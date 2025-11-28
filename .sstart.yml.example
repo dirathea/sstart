@@ -1,0 +1,35 @@
+providers:
+  # AWS Secrets Manager example - production secrets
+  # Each provider loads from a single source. ID defaults to 'kind' if not specified.
+  # Providers are processed in order - later providers override earlier ones for duplicate keys
+  - kind: aws_secretsmanager
+    id: aws-prod  # Explicit ID required because there are multiple aws_secretsmanager providers
+    secret_id: myapp/production
+    keys:
+      API_KEY: ==
+      DATABASE_URL: ==
+      API_SECRET: API_SECRET_KEY
+
+  # Another AWS Secrets Manager provider for staging
+  # ID is required here because there are multiple providers of the same 'kind'
+  - kind: aws_secretsmanager
+    id: aws-staging
+    secret_id: myapp/{{ get_env(name="STAGE", default="staging") }}
+    keys:
+      API_KEY: ==
+
+  # Dotenv file example
+  # This provider will override previous providers for any duplicate keys
+  # ID defaults to 'dotenv' since there's only one provider of this kind
+  - kind: dotenv
+    path: .env.local
+    keys:
+      LOCAL_API_KEY: API_KEY
+      LOCAL_DB_URL: DATABASE_URL
+
+  # Another dotenv example
+  # ID is required here because there are multiple providers of the same 'kind'
+  - kind: dotenv
+    id: dotenv-shared
+    path: ${HOME}/.config/myapp/.env
+

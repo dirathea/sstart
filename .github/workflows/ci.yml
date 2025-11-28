@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run End-to-End Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify Docker is available
+        run: |
+          docker --version
+          docker info
+
+      - name: Run end-to-end tests
+        run: go test -v ./tests/end2end/...
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - goos: windows
+            goarch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -o sstart${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/sstart
+          ls -lh sstart*
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sstart-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: sstart${{ matrix.goos == 'windows' && '.exe' || '' }}
+
