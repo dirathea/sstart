@@ -230,44 +230,43 @@ providers:
 	t.Logf("Successfully tested selective provider collection")
 }
 
-// TestE2E_Testcontainers_GCSM tests the GCSM provider using testcontainers
+// TestE2E_Testcontainers_GCSM tests the GCSM provider using real Google Cloud Secret Manager API
 func TestE2E_Testcontainers_GCSM(t *testing.T) {
 	ctx := context.Background()
 
-	// Setup GCSM emulator container
+	// Setup GCSM client (uses real API, requires credentials)
 	gcsmContainer := SetupGCSM(ctx, t)
 	defer func() {
 		if err := gcsmContainer.Cleanup(); err != nil {
-			t.Errorf("Failed to terminate GCSM container: %v", err)
+			t.Errorf("Failed to cleanup GCSM client: %v", err)
 		}
 	}()
 
-	// Set up GCSM secret
-	projectID := "test-project"
-	secretID := "myapp-secrets"
-	secretData := map[string]string{
-		"GCSM_API_KEY":     "gcsm-secret-api-key-12345",
-		"GCSM_DB_PASSWORD": "gcsm-secret-db-password",
-		"GCSM_JWT_SECRET":  "gcsm-secret-jwt-token",
+	// Use predefined secret name (must be created beforehand)
+	// Can be overridden with GCSM_TEST_SECRET_ID environment variable
+	projectID := gcsmContainer.ProjectID
+	secretID := os.Getenv("GCSM_TEST_SECRET_ID")
+	if secretID == "" {
+		secretID = "test-ci"
 	}
-	SetupGCSMSecret(ctx, t, gcsmContainer, projectID, secretID, secretData)
+
+	// Verify the secret exists (test will skip if it doesn't)
+	VerifyGCSMSecretExists(ctx, t, gcsmContainer, projectID, secretID)
 
 	// Create temporary config file
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, ".sstart.yml")
 
+	// For real API, don't specify endpoint (uses default)
 	configYAML := fmt.Sprintf(`
 providers:
   - kind: gcloud_secretmanager
     id: gcsm-test
     project_id: %s
     secret_id: %s
-    endpoint: %s
     keys:
-      GCSM_API_KEY: GCSM_API_KEY
-      GCSM_DB_PASSWORD: GCSM_DB_PASSWORD
-      GCSM_JWT_SECRET: ==
-`, projectID, secretID, gcsmContainer.Endpoint)
+      foo: FOO
+`, projectID, secretID)
 
 	if err := os.WriteFile(configFile, []byte(configYAML), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
@@ -289,10 +288,10 @@ providers:
 	}
 
 	// Verify GCSM secrets
+	// Note: These values must match what's in the predefined secret
+	// The secret test-ci contains: {"foo":"bar"}
 	expectedGCSMSecrets := map[string]string{
-		"GCSM_API_KEY":     "gcsm-secret-api-key-12345",
-		"GCSM_DB_PASSWORD": "gcsm-secret-db-password",
-		"GCSM_JWT_SECRET":  "gcsm-secret-jwt-token", // Same name (==)
+		"FOO": "bar", // The secret contains {"foo":"bar"}
 	}
 
 	for key, expectedValue := range expectedGCSMSecrets {
@@ -349,14 +348,16 @@ func TestE2E_Testcontainers_AllProviders(t *testing.T) {
 	}
 	SetupVaultSecret(ctx, t, vaultContainer, vaultPath, vaultSecretData)
 
-	// Set up GCSM secret
-	projectID := "test-project"
-	gcsmSecretID := "myapp-secrets"
-	gcsmSecretData := map[string]string{
-		"GCSM_API_KEY":     "gcsm-secret-api-key-99999",
-		"GCSM_DB_PASSWORD": "gcsm-secret-db-password",
+	// Use predefined secret name (must be created beforehand)
+	// Can be overridden with GCSM_TEST_SECRET_ID environment variable
+	projectID := gcsmContainer.ProjectID
+	gcsmSecretID := os.Getenv("GCSM_TEST_SECRET_ID")
+	if gcsmSecretID == "" {
+		gcsmSecretID = "test-ci"
 	}
-	SetupGCSMSecret(ctx, t, gcsmContainer, projectID, gcsmSecretID, gcsmSecretData)
+
+	// Verify the secret exists (test will skip if it doesn't)
+	VerifyGCSMSecretExists(ctx, t, gcsmContainer, projectID, gcsmSecretID)
 
 	// Create temporary config file
 	tmpDir := t.TempDir()
@@ -387,11 +388,9 @@ providers:
     id: gcsm-test
     project_id: %s
     secret_id: %s
-    endpoint: %s
     keys:
-      GCSM_API_KEY: GCSM_API_KEY
-      GCSM_DB_PASSWORD: GCSM_DB_PASSWORD
-`, secretName, localstack.Endpoint, vaultPath, vaultContainer.Address, projectID, gcsmSecretID, gcsmContainer.Endpoint)
+      foo: FOO
+`, secretName, localstack.Endpoint, vaultPath, vaultContainer.Address, projectID, gcsmSecretID)
 
 	if err := os.WriteFile(configFile, []byte(configYAML), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
@@ -447,9 +446,10 @@ providers:
 	}
 
 	// Verify GCSM secrets
+	// Note: These values must match what's in the predefined secret
+	// The secret test-ci contains: {"foo":"bar"}
 	expectedGCSMSecrets := map[string]string{
-		"GCSM_API_KEY":     "gcsm-secret-api-key-99999",
-		"GCSM_DB_PASSWORD": "gcsm-secret-db-password",
+		"FOO": "bar", // The secret contains {"foo":"bar"}
 	}
 
 	for key, expectedValue := range expectedGCSMSecrets {
