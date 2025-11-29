@@ -4,15 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	secretmanager "cloud.google.com/go/secretmanager/apiv1"
+	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/hashicorp/vault/api"
+	"github.com/testcontainers/testcontainers-go"
 	localstack "github.com/testcontainers/testcontainers-go/modules/localstack"
 	"github.com/testcontainers/testcontainers-go/modules/vault"
 )
@@ -29,6 +33,15 @@ type VaultContainer struct {
 	Container *vault.VaultContainer
 	Address   string
 	Client    *api.Client
+	Cleanup   func() error
+}
+
+// GCSMContainer wraps GCSM client for real API testing
+type GCSMContainer struct {
+	Container testcontainers.Container // nil for real API
+	Endpoint  string                   // empty for real API
+	Client    *secretmanager.Client
+	ProjectID string // GCP project ID for real API
 	Cleanup   func() error
 }
 
@@ -109,6 +122,20 @@ func SetupContainers(ctx context.Context, t *testing.T) (*LocalStackContainer, *
 	return localstack, vault
 }
 
+// SetupAllContainers sets up LocalStack, Vault, and GCSM containers
+func SetupAllContainers(ctx context.Context, t *testing.T) (*LocalStackContainer, *VaultContainer, *GCSMContainer) {
+	t.Helper()
+
+	localstack := SetupLocalStack(ctx, t)
+	vault := SetupVault(ctx, t)
+	gcsm := SetupGCSM(ctx, t)
+
+	// Wait for containers to be ready
+	time.Sleep(2 * time.Second)
+
+	return localstack, vault, gcsm
+}
+
 // SetupAWSSecret creates a secret in AWS Secrets Manager (LocalStack)
 func SetupAWSSecret(ctx context.Context, t *testing.T, localstack *LocalStackContainer, secretName string, secretData map[string]string) {
 	t.Helper()
@@ -161,5 +188,61 @@ func SetupVaultSecret(ctx context.Context, t *testing.T, vaultContainer *VaultCo
 	})
 	if err != nil {
 		t.Fatalf("Failed to write secret to Vault: %v", err)
+	}
+}
+
+// SetupGCSM creates a client for real Google Cloud Secret Manager API
+// Requires GOOGLE_APPLICATION_CREDENTIALS or gcloud auth to be configured
+func SetupGCSM(ctx context.Context, t *testing.T) *GCSMContainer {
+	t.Helper()
+
+	// Get project ID from environment (required for real API)
+	// Default to the test project if not set
+	projectID := os.Getenv("GCP_PROJECT_ID")
+	if projectID == "" {
+		projectID = "sstart-ci" // Default test project ID
+	}
+
+	// Create client using Application Default Credentials (ADC)
+	// This will use:
+	// 1. GOOGLE_APPLICATION_CREDENTIALS env var (service account key file)
+	// 2. gcloud auth application-default login credentials
+	// 3. GCE metadata server (if running on GCE)
+	client, err := secretmanager.NewClient(ctx)
+	if err != nil {
+		t.Fatalf("Failed to create GCSM client: %v. Make sure credentials are configured.", err)
+	}
+
+	return &GCSMContainer{
+		Container: nil, // No container for real API
+		Endpoint:  "",  // Empty for real API (uses default endpoint)
+		Client:    client,
+		ProjectID: projectID,
+		Cleanup: func() error {
+			return client.Close()
+		},
+	}
+}
+
+// VerifyGCSMSecretExists checks if a secret exists in Google Cloud Secret Manager
+// This is used to verify that predefined secrets are available for testing
+func VerifyGCSMSecretExists(ctx context.Context, t *testing.T, gcsmContainer *GCSMContainer, projectID, secretID string) {
+	t.Helper()
+
+	// Use project ID from container if not provided
+	if projectID == "" {
+		projectID = gcsmContainer.ProjectID
+	}
+
+	// Try to access the secret to verify it exists
+	secretName := fmt.Sprintf("projects/%s/secrets/%s/versions/latest", projectID, secretID)
+	req := &secretmanagerpb.AccessSecretVersionRequest{
+		Name: secretName,
+	}
+
+	_, err := gcsmContainer.Client.AccessSecretVersion(ctx, req)
+	if err != nil {
+		t.Skipf("Skipping test: Secret '%s' does not exist or is not accessible. "+
+			"Please create it beforehand. See tests/end2end/GCSM_SETUP.md for instructions.", secretID)
 	}
 }
