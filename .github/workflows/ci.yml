@@ -57,7 +57,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          go build -o sstart${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/sstart
+          go build -o sstart${{ matrix.goos == 'windows' && '.exe' || '' }} github.com/dirathea/sstart/cmd/sstart
           ls -lh sstart*
 
       - name: Upload artifact
