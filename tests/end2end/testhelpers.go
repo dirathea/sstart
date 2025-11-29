@@ -11,17 +11,17 @@ import (
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
-	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets"
 	"github.com/hashicorp/vault/api"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 	localstack "github.com/testcontainers/testcontainers-go/modules/localstack"
 	"github.com/testcontainers/testcontainers-go/modules/vault"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // LocalStackContainer wraps LocalStack container and its endpoint
@@ -259,16 +259,16 @@ func VerifyGCSMSecretExists(ctx context.Context, t *testing.T, gcsmContainer *GC
 }
 
 // SetupAzureKeyVault starts an Azure Key Vault emulator container and returns the container info
-// Uses Lowkey Vault, a test double for Azure Key Vault that's compatible with Azure Key Vault REST APIs
+// Uses james-gould/azure-keyvault-emulator, which is designed for Azure SDK compatibility
 func SetupAzureKeyVault(ctx context.Context, t *testing.T) *AzureKeyVaultContainer {
 	t.Helper()
 
-	// Lowkey Vault runs on port 8443 (HTTPS) by default
-	// Wait for the port to be ready - Lowkey Vault may take a moment to start
+	// Azure Key Vault emulator runs on port 4997 (HTTPS) by default
+	// Wait for the port to be ready - the emulator may take a moment to start
 	req := testcontainers.ContainerRequest{
-		Image:        "nagyesta/lowkey-vault:4.0.0-ubi9-minimal",
-		ExposedPorts: []string{"8443/tcp"},
-		WaitingFor:   wait.ForListeningPort("8443/tcp"),
+		Image:        "jamesgoulddev/azure-keyvault-emulator:latest",
+		ExposedPorts: []string{"4997/tcp"},
+		WaitingFor:   wait.ForListeningPort("4997/tcp"),
 	}
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -284,21 +284,21 @@ func SetupAzureKeyVault(ctx context.Context, t *testing.T) *AzureKeyVaultContain
 		t.Fatalf("Failed to get Azure Key Vault emulator host: %v", err)
 	}
 
-	port, err := container.MappedPort(ctx, "8443/tcp")
+	port, err := container.MappedPort(ctx, "4997/tcp")
 	if err != nil {
 		t.Fatalf("Failed to get Azure Key Vault emulator port: %v", err)
 	}
 
-	// Lowkey Vault uses HTTPS and expects vault URL format: https://host:port
+	// Azure Key Vault emulator uses HTTPS and expects vault URL format: https://host:port
 	vaultURL := fmt.Sprintf("https://%s:%s", host, port.Port())
 
-	// Lowkey Vault doesn't require real Azure credentials for testing
+	// Azure Key Vault emulator doesn't require real Azure credentials for testing
 	// We can use a simple credential with dummy values, or try DefaultAzureCredential
 	// For testing, we'll use DefaultAzureCredential which should work even with dummy values
 	// If it fails, we can fall back to environment variables or a simple credential
 	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	if err != nil {
-		// For Lowkey Vault, we can use dummy credentials since it doesn't validate them
+		// For the emulator, we can use dummy credentials since it doesn't validate them
 		// Set dummy values via environment variables if DefaultAzureCredential fails
 		os.Setenv("AZURE_CLIENT_ID", "test-client-id")
 		os.Setenv("AZURE_CLIENT_SECRET", "test-client-secret")
@@ -309,7 +309,7 @@ func SetupAzureKeyVault(ctx context.Context, t *testing.T) *AzureKeyVaultContain
 		}
 	}
 
-	// Create client - Lowkey Vault uses self-signed certificates, so we might need to configure TLS
+	// Create client - The emulator uses self-signed certificates, so we might need to configure TLS
 	// The Azure SDK should handle this, but we may need to configure it to skip certificate verification
 	client, err := azsecrets.NewClient(vaultURL, cred, nil)
 	if err != nil {
