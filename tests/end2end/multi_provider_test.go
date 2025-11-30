@@ -16,10 +16,10 @@ import (
 	"github.com/dirathea/sstart/internal/secrets"
 )
 
-// TestE2E_Testcontainers tests the full functionality using testcontainers
+// TestE2E_MultiProvider tests multiple providers together
 // It sets up localstack for AWS Secrets Manager and Vault containers,
 // creates secrets in both, and verifies the end-to-end flow
-func TestE2E_Testcontainers(t *testing.T) {
+func TestE2E_MultiProvider(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup containers
@@ -143,8 +143,8 @@ providers:
 	t.Logf("Successfully collected %d secrets from both providers", len(collectedSecrets))
 }
 
-// TestE2E_Testcontainers_SelectiveProviders tests collecting secrets from specific providers
-func TestE2E_Testcontainers_SelectiveProviders(t *testing.T) {
+// TestE2E_MultiProvider_Selective tests collecting secrets from specific providers
+func TestE2E_MultiProvider_Selective(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup containers
@@ -231,92 +231,8 @@ providers:
 	t.Logf("Successfully tested selective provider collection")
 }
 
-// TestE2E_Testcontainers_GCSM tests the GCSM provider using real Google Cloud Secret Manager API
-func TestE2E_Testcontainers_GCSM(t *testing.T) {
-	ctx := context.Background()
-
-	// Setup GCSM client (uses real API, requires credentials)
-	gcsmContainer := SetupGCSM(ctx, t)
-	defer func() {
-		if err := gcsmContainer.Cleanup(); err != nil {
-			t.Errorf("Failed to cleanup GCSM client: %v", err)
-		}
-	}()
-
-	// Use predefined secret name (must be created beforehand)
-	// Can be overridden with GCSM_TEST_SECRET_ID environment variable
-	projectID := gcsmContainer.ProjectID
-	secretID := os.Getenv("GCSM_TEST_SECRET_ID")
-	if secretID == "" {
-		secretID = "test-ci"
-	}
-
-	// Verify the secret exists (test will skip if it doesn't)
-	VerifyGCSMSecretExists(ctx, t, gcsmContainer, projectID, secretID)
-
-	// Create temporary config file
-	tmpDir := t.TempDir()
-	configFile := filepath.Join(tmpDir, ".sstart.yml")
-
-	// For real API, don't specify endpoint (uses default)
-	configYAML := fmt.Sprintf(`
-providers:
-  - kind: gcloud_secretmanager
-    id: gcsm-test
-    project_id: %s
-    secret_id: %s
-    keys:
-      foo: FOO
-`, projectID, secretID)
-
-	if err := os.WriteFile(configFile, []byte(configYAML), 0644); err != nil {
-		t.Fatalf("Failed to write config file: %v", err)
-	}
-
-	// Load config
-	cfg, err := config.Load(configFile)
-	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
-	}
-
-	// Create collector
-	collector := secrets.NewCollector(cfg)
-
-	// Collect secrets from GCSM provider
-	collectedSecrets, err := collector.Collect(ctx, nil)
-	if err != nil {
-		t.Fatalf("Failed to collect secrets: %v", err)
-	}
-
-	// Verify GCSM secrets
-	// Note: These values must match what's in the predefined secret
-	// The secret test-ci contains: {"foo":"bar"}
-	expectedGCSMSecrets := map[string]string{
-		"FOO": "bar", // The secret contains {"foo":"bar"}
-	}
-
-	for key, expectedValue := range expectedGCSMSecrets {
-		actualValue, exists := collectedSecrets[key]
-		if !exists {
-			t.Errorf("Expected secret '%s' from GCSM not found", key)
-			continue
-		}
-		if actualValue != expectedValue {
-			t.Errorf("Secret '%s' from GCSM: expected '%s', got '%s'", key, expectedValue, actualValue)
-		}
-	}
-
-	// Verify that we have all expected secrets
-	expectedCount := len(expectedGCSMSecrets)
-	if len(collectedSecrets) != expectedCount {
-		t.Errorf("Expected %d secrets, got %d. Secrets: %v", expectedCount, len(collectedSecrets), collectedSecrets)
-	}
-
-	t.Logf("Successfully collected %d secrets from GCSM provider", len(collectedSecrets))
-}
-
-// TestE2E_Testcontainers_AllProviders tests all providers together including GCSM
-func TestE2E_Testcontainers_AllProviders(t *testing.T) {
+// TestE2E_MultiProvider_All tests all providers together including GCSM
+func TestE2E_MultiProvider_All(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup containers
@@ -471,87 +387,4 @@ providers:
 	}
 
 	t.Logf("Successfully collected %d secrets from all providers (AWS, Vault, GCSM)", len(collectedSecrets))
-}
-
-// TestE2E_Testcontainers_AzureKeyVault tests the Azure Key Vault provider using emulator
-func TestE2E_Testcontainers_AzureKeyVault(t *testing.T) {
-	ctx := context.Background()
-
-	// Setup Azure Key Vault emulator
-	akvContainer := SetupAzureKeyVault(ctx, t)
-	defer func() {
-		if err := akvContainer.Cleanup(); err != nil {
-			t.Errorf("Failed to cleanup Azure Key Vault container: %v", err)
-		}
-	}()
-
-	// Set up Azure Key Vault secret
-	secretName := "test-secret"
-	secretData := map[string]interface{}{
-		"API_KEY":     "azure-secret-api-key-12345",
-		"DB_PASSWORD": "azure-secret-db-password",
-		"JWT_SECRET":  "azure-secret-jwt-token",
-	}
-	SetupAzureKeyVaultSecret(ctx, t, akvContainer, secretName, secretData)
-
-	// Create temporary config file
-	tmpDir := t.TempDir()
-	configFile := filepath.Join(tmpDir, ".sstart.yml")
-
-	configYAML := fmt.Sprintf(`
-providers:
-  - kind: azure_keyvault
-    id: azure-test
-    vault_url: %s
-    secret_name: %s
-    keys:
-      API_KEY: AZURE_API_KEY
-      DB_PASSWORD: AZURE_DB_PASSWORD
-      JWT_SECRET: ==
-`, akvContainer.VaultURL, secretName)
-
-	if err := os.WriteFile(configFile, []byte(configYAML), 0644); err != nil {
-		t.Fatalf("Failed to write config file: %v", err)
-	}
-
-	// Load config
-	cfg, err := config.Load(configFile)
-	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
-	}
-
-	// Create collector
-	collector := secrets.NewCollector(cfg)
-
-	// Collect secrets from Azure Key Vault provider
-	collectedSecrets, err := collector.Collect(ctx, nil)
-	if err != nil {
-		t.Fatalf("Failed to collect secrets: %v", err)
-	}
-
-	// Verify Azure Key Vault secrets
-	expectedAzureSecrets := map[string]string{
-		"AZURE_API_KEY":     "azure-secret-api-key-12345",
-		"AZURE_DB_PASSWORD": "azure-secret-db-password",
-		"JWT_SECRET":        "azure-secret-jwt-token", // Same name (==)
-	}
-
-	for key, expectedValue := range expectedAzureSecrets {
-		actualValue, exists := collectedSecrets[key]
-		if !exists {
-			t.Errorf("Expected secret '%s' from Azure Key Vault not found", key)
-			continue
-		}
-		if actualValue != expectedValue {
-			t.Errorf("Secret '%s' from Azure Key Vault: expected '%s', got '%s'", key, expectedValue, actualValue)
-		}
-	}
-
-	// Verify that we have all expected secrets
-	expectedCount := len(expectedAzureSecrets)
-	if len(collectedSecrets) != expectedCount {
-		t.Errorf("Expected %d secrets, got %d. Secrets: %v", expectedCount, len(collectedSecrets), collectedSecrets)
-	}
-
-	t.Logf("Successfully collected %d secrets from Azure Key Vault provider", len(collectedSecrets))
 }
