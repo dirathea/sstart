@@ -12,7 +12,8 @@ builds:
       - amd64
       - arm64
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
+      - CGO_LDFLAGS=-lm
     ldflags:
       - -s -w
       - -X github.com/dirathea/sstart/internal/cli.version={{.Version}}
