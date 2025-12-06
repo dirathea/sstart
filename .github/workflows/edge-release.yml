@@ -58,9 +58,32 @@ jobs:
           OP_TEST_VAULT_NAME: ${{ secrets.OP_TEST_VAULT_NAME }}
         run: go test -v ./tests/end2end/...
 
+  prepare-tag:
+    name: Create Edge Tag
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create or update edge tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Delete local tag if it exists
+          git tag -d edge 2>/dev/null || true
+          # Fetch remote tags to check if edge exists
+          git fetch origin --tags --force
+          # Create new edge tag pointing to current commit
+          git tag -f edge
+          # Force push the tag to update the remote edge tag
+          git push origin edge --force
+
   release:
     name: Build and Release Edge
-    needs: test
+    needs: prepare-tag
     strategy:
       matrix:
         include:
@@ -80,6 +103,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: edge
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -96,12 +120,12 @@ jobs:
           echo "AR=aarch64-linux-gnu-ar" >> $GITHUB_ENV
           echo "AS=aarch64-linux-gnu-as" >> $GITHUB_ENV
 
-      - name: Run GoReleaser (build only)
+      - name: Run GoReleaser (split build)
         uses: goreleaser/goreleaser-action@v5
         with:
           distribution: goreleaser
           version: latest
-          args: build --clean --snapshot --id=${{ matrix.build_id }}
+          args: release --clean --split --id=${{ matrix.build_id }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -121,7 +145,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          fetch-tags: true
+          ref: edge
 
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
@@ -136,33 +160,19 @@ jobs:
       - name: Prepare dist directory for GoReleaser
         run: |
           mkdir -p dist
-          # GoReleaser expects binaries in dist/ with specific naming
-          # Copy binaries maintaining GoReleaser's expected structure
+          # GoReleaser expects artifacts in dist/
           for dir in dist-artifacts/*/; do
             if [ -d "$dir" ]; then
               cp -r "$dir"* dist/ 2>/dev/null || true
             fi
           done
+          ls -la dist/
 
-      - name: Create or update edge tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Delete local tag if it exists
-          git tag -d edge 2>/dev/null || true
-          # Fetch remote tags to check if edge exists
-          git fetch origin --tags --force
-          # Create new edge tag pointing to current commit
-          git tag -f edge
-          # Force push the tag to update the remote edge tag
-          git push origin edge --force
-
-      - name: Run GoReleaser (package and release edge)
+      - name: Run GoReleaser (merge and release)
         uses: goreleaser/goreleaser-action@v5
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean --skip=build,validate
+          args: continue --merge
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

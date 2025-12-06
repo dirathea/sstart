@@ -96,12 +96,12 @@ jobs:
           echo "AR=aarch64-linux-gnu-ar" >> $GITHUB_ENV
           echo "AS=aarch64-linux-gnu-as" >> $GITHUB_ENV
 
-      - name: Run GoReleaser (build only)
+      - name: Run GoReleaser (split build)
         uses: goreleaser/goreleaser-action@v5
         with:
           distribution: goreleaser
           version: latest
-          args: build --clean --id=${{ matrix.build_id }}
+          args: release --clean --split --id=${{ matrix.build_id }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -136,20 +136,20 @@ jobs:
       - name: Prepare dist directory for GoReleaser
         run: |
           mkdir -p dist
-          # GoReleaser expects binaries in dist/ with specific naming
-          # Copy binaries maintaining GoReleaser's expected structure
+          # GoReleaser expects artifacts in dist/
           for dir in dist-artifacts/*/; do
             if [ -d "$dir" ]; then
               cp -r "$dir"* dist/ 2>/dev/null || true
             fi
           done
+          ls -la dist/
 
-      - name: Run GoReleaser (package and release)
+      - name: Run GoReleaser (merge and release)
         uses: goreleaser/goreleaser-action@v5
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean --skip=build,validate
+          args: continue --merge
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
