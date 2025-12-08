@@ -1,3 +1,5 @@
+version: 2
+
 project_name: sstart
 
 builds:
@@ -97,7 +99,7 @@ checksum:
   name_template: 'checksums.txt'
 
 snapshot:
-  name_template: "{{ .Tag }}-next"
+  version_template: "{{ incpatch .Version }}-edge+{{ .ShortCommit }}"
 
 changelog:
   sort: asc
