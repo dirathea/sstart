@@ -56,34 +56,16 @@ jobs:
           BW_CLIENTID: ${{ secrets.BW_CLIENTID }}
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           OP_TEST_VAULT_NAME: ${{ secrets.OP_TEST_VAULT_NAME }}
+          SSTART_E2E_INFISICAL_PROJECT_ID: ${{ secrets.SSTART_E2E_INFISICAL_PROJECT_ID }}
+          SSTART_E2E_INFISICAL_ENVIRONMENT: ${{ secrets.SSTART_E2E_INFISICAL_ENVIRONMENT }}
+          INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET: ${{ secrets.INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET }}
+          INFISICAL_UNIVERSAL_AUTH_CLIENT_ID: ${{ secrets.INFISICAL_UNIVERSAL_AUTH_CLIENT_ID }}
+          INFISICAL_SITE_URL: ${{ secrets.INFISICAL_SITE_URL }}
         run: go test -v ./tests/end2end/...
 
-  prepare-tag:
-    name: Create Edge Tag
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Create or update edge tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Delete local tag if it exists
-          git tag -d edge 2>/dev/null || true
-          # Fetch remote tags to check if edge exists
-          git fetch origin --tags --force
-          # Create new edge tag pointing to current commit
-          git tag -f edge
-          # Force push the tag to update the remote edge tag
-          git push origin edge --force
-
   release:
-    name: Build and Release Edge
-    needs: prepare-tag
+    name: Build Edge Snapshot
+    needs: test
     strategy:
       matrix:
         include:
@@ -103,7 +85,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: edge
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -120,14 +101,12 @@ jobs:
           echo "AR=aarch64-linux-gnu-ar" >> $GITHUB_ENV
           echo "AS=aarch64-linux-gnu-as" >> $GITHUB_ENV
 
-      - name: Run GoReleaser (split build)
+      - name: Run GoReleaser (build snapshot)
         uses: goreleaser/goreleaser-action@v5
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean --split --id=${{ matrix.build_id }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          args: build --snapshot --clean --id=${{ matrix.build_id }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -135,44 +114,3 @@ jobs:
           name: dist-${{ matrix.build_id }}
           path: dist/*
           retention-days: 1
-
-  package:
-    name: Package and Release Edge
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: edge
-
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist-artifacts
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Prepare dist directory for GoReleaser
-        run: |
-          mkdir -p dist
-          # GoReleaser expects artifacts in dist/
-          for dir in dist-artifacts/*/; do
-            if [ -d "$dir" ]; then
-              cp -r "$dir"* dist/ 2>/dev/null || true
-            fi
-          done
-          ls -la dist/
-
-      - name: Run GoReleaser (merge and release)
-        uses: goreleaser/goreleaser-action@v5
-        with:
-          distribution: goreleaser
-          version: latest
-          args: continue --merge
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

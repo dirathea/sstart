@@ -56,10 +56,15 @@ jobs:
           BW_CLIENTID: ${{ secrets.BW_CLIENTID }}
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           OP_TEST_VAULT_NAME: ${{ secrets.OP_TEST_VAULT_NAME }}
+          SSTART_E2E_INFISICAL_PROJECT_ID: ${{ secrets.SSTART_E2E_INFISICAL_PROJECT_ID }}
+          SSTART_E2E_INFISICAL_ENVIRONMENT: ${{ secrets.SSTART_E2E_INFISICAL_ENVIRONMENT }}
+          INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET: ${{ secrets.INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET }}
+          INFISICAL_UNIVERSAL_AUTH_CLIENT_ID: ${{ secrets.INFISICAL_UNIVERSAL_AUTH_CLIENT_ID }}
+          INFISICAL_SITE_URL: ${{ secrets.INFISICAL_SITE_URL }}
         run: go test -v ./tests/end2end/...
 
-  release:
-    name: Build and Release
+  build:
+    name: Build Artifacts
     needs: test
     strategy:
       matrix:
@@ -96,14 +101,12 @@ jobs:
           echo "AR=aarch64-linux-gnu-ar" >> $GITHUB_ENV
           echo "AS=aarch64-linux-gnu-as" >> $GITHUB_ENV
 
-      - name: Run GoReleaser (split build)
+      - name: Run GoReleaser (build)
         uses: goreleaser/goreleaser-action@v5
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean --split --id=${{ matrix.build_id }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          args: build --clean --id=${{ matrix.build_id }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -112,9 +115,9 @@ jobs:
           path: dist/*
           retention-days: 1
 
-  package:
-    name: Package and Release
-    needs: release
+  release:
+    name: Publish Release
+    needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     steps:
@@ -144,12 +147,12 @@ jobs:
           done
           ls -la dist/
 
-      - name: Run GoReleaser (merge and release)
+      - name: Run GoReleaser (release)
         uses: goreleaser/goreleaser-action@v5
         with:
           distribution: goreleaser
           version: latest
-          args: continue --merge
+          args: release --skip=build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
