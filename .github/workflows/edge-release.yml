@@ -191,7 +191,7 @@ jobs:
             const shortSha = context.sha.substring(0, 7);
             const edgeVersion = `edge+${shortSha}`;
             core.setOutput('version', edgeVersion);
-            core.setOutput('tag', `v${edgeVersion}`);
+            core.setOutput('tag', edgeVersion);
             console.log(`Calculated version: ${edgeVersion}`);
 
       - name: Download all artifacts
