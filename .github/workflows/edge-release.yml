@@ -118,11 +118,13 @@ jobs:
 
       - name: Calculate version
         id: version
-        run: |
-          # Use edge+short-commit format
-          EDGE_VERSION="edge+${GITHUB_SHA::7}"
-          echo "version=${EDGE_VERSION}" >> $GITHUB_OUTPUT
-          echo "Calculated version: ${EDGE_VERSION}"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const shortSha = context.sha.substring(0, 7);
+            const edgeVersion = `edge+${shortSha}`;
+            core.setOutput('version', edgeVersion);
+            console.log(`Calculated version: ${edgeVersion}`);
 
       - name: Build binary
         env:
@@ -185,12 +187,14 @@ jobs:
 
       - name: Calculate version
         id: version
-        run: |
-          # Use edge+short-commit format
-          EDGE_VERSION="edge+${GITHUB_SHA::7}"
-          echo "version=${EDGE_VERSION}" >> $GITHUB_OUTPUT
-          echo "tag=v${EDGE_VERSION}" >> $GITHUB_OUTPUT
-          echo "Calculated version: ${EDGE_VERSION}"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const shortSha = context.sha.substring(0, 7);
+            const edgeVersion = `edge+${shortSha}`;
+            core.setOutput('version', edgeVersion);
+            core.setOutput('tag', `v${edgeVersion}`);
+            console.log(`Calculated version: ${edgeVersion}`);
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
