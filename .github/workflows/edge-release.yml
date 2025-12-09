@@ -89,11 +89,6 @@ jobs:
             goos: darwin
             goarch: arm64
             binary_name: sstart
-          - build_id: sstart-windows-amd64
-            runner: windows-latest
-            goos: windows
-            goarch: amd64
-            binary_name: sstart.exe
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout code
