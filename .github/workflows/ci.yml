@@ -33,7 +33,7 @@ jobs:
               - kind: infisical
                 project_id: 8aded323-e110-4f48-9c7f-24c275358609
                 environment: prod
-                path: github
+                path: /github
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
