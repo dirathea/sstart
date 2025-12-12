@@ -288,9 +288,9 @@ If the secret value is plain text (not JSON), it will be mapped to a single envi
 
 For example, if the provider ID is `aws-prod`, the secret will be loaded to `AWS_PROD_SECRET`.
 
-### HashiCorp Vault (`vault`)
+### HashiCorp Vault / OpenBao (`vault`)
 
-Retrieves secrets from HashiCorp Vault. Supports both KV v1 and KV v2 secret engines.
+Retrieves secrets from HashiCorp Vault or OpenBao. Supports both KV v1 and KV v2 secret engines. OpenBao is a community-driven fork of HashiCorp Vault that maintains API compatibility, so the same `vault` provider works with both systems.
 
 **Configuration:**
 - `path` (required): The path to the secret in Vault
@@ -318,6 +318,24 @@ providers:
 
 **KV v1 and v2 Support:**
 The provider automatically detects and supports both KV v1 and KV v2 secret engines. For KV v2, the data is automatically extracted from the `data` key.
+
+**OpenBao Support:**
+OpenBao is a community-driven, open-source fork of HashiCorp Vault that maintains full API compatibility. You can use the same `vault` provider configuration to connect to OpenBao instances. Simply point the `address` field to your OpenBao server URL:
+
+```yaml
+providers:
+  - kind: vault
+    id: openbao-prod
+    address: https://openbao.example.com:8200
+    mount: secret
+    path: myapp/production
+    token: your-openbao-token
+    keys:
+      API_KEY: ==
+      DATABASE_URL: ==
+```
+
+The provider uses the same HashiCorp Vault API client, which is compatible with OpenBao's API. All features, including KV v1/v2 support, work identically with both Vault and OpenBao.
 
 ### Bitwarden (`bitwarden`)
 

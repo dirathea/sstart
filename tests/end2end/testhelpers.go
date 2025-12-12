@@ -16,9 +16,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/hashicorp/vault/api"
+	"github.com/testcontainers/testcontainers-go"
 	localstack "github.com/testcontainers/testcontainers-go/modules/localstack"
 	"github.com/testcontainers/testcontainers-go/modules/vault"
-	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // LocalStackContainer wraps LocalStack container and its endpoint
@@ -31,6 +32,14 @@ type LocalStackContainer struct {
 // VaultContainer wraps Vault container, address, and client
 type VaultContainer struct {
 	Container *vault.VaultContainer
+	Address   string
+	Client    *api.Client
+	Cleanup   func() error
+}
+
+// OpenBaoContainer wraps OpenBao container, address, and client
+type OpenBaoContainer struct {
+	Container testcontainers.Container
 	Address   string
 	Client    *api.Client
 	Cleanup   func() error
@@ -167,6 +176,58 @@ func SetupAWSSecret(ctx context.Context, t *testing.T, localstack *LocalStackCon
 	}
 }
 
+// SetupOpenBao starts an OpenBao container and returns the container info
+// OpenBao is API-compatible with HashiCorp Vault, so we use the same Vault API client
+func SetupOpenBao(ctx context.Context, t *testing.T) *OpenBaoContainer {
+	t.Helper()
+
+	// OpenBao uses the same API as Vault, so we can use a generic container
+	// OpenBao in dev mode needs to be run with the server -dev command
+	req := testcontainers.ContainerRequest{
+		Image:        "openbao/openbao:latest",
+		ExposedPorts: []string{"8200/tcp"},
+		Cmd:          []string{"server", "-dev", "-dev-root-token-id=test-token", "-dev-listen-address=0.0.0.0:8200"},
+		WaitingFor:   wait.ForHTTP("/v1/sys/health").WithPort("8200/tcp"),
+	}
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil {
+		t.Fatalf("Failed to start OpenBao container: %v", err)
+	}
+
+	host, err := container.Host(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get OpenBao host: %v", err)
+	}
+
+	port, err := container.MappedPort(ctx, "8200/tcp")
+	if err != nil {
+		t.Fatalf("Failed to get OpenBao port: %v", err)
+	}
+
+	address := fmt.Sprintf("http://%s:%s", host, port.Port())
+
+	client, err := api.NewClient(&api.Config{
+		Address: address,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create OpenBao client: %v", err)
+	}
+	client.SetToken("test-token")
+
+	return &OpenBaoContainer{
+		Container: container,
+		Address:   address,
+		Client:    client,
+		Cleanup: func() error {
+			return container.Terminate(ctx)
+		},
+	}
+}
+
 // SetupVaultSecret enables KV v2 engine (if needed) and writes a secret to Vault
 func SetupVaultSecret(ctx context.Context, t *testing.T, vaultContainer *VaultContainer, vaultPath string, secretData map[string]interface{}) {
 	t.Helper()
@@ -188,6 +249,36 @@ func SetupVaultSecret(ctx context.Context, t *testing.T, vaultContainer *VaultCo
 	})
 	if err != nil {
 		t.Fatalf("Failed to write secret to Vault: %v", err)
+	}
+}
+
+// SetupOpenBaoSecret enables KV v2 engine (if needed) and writes a secret to OpenBao
+// OpenBao is API-compatible with Vault, so this function is similar to SetupVaultSecret
+func SetupOpenBaoSecret(ctx context.Context, t *testing.T, openbaoContainer *OpenBaoContainer, openbaoPath string, secretData map[string]interface{}) {
+	t.Helper()
+
+	// In dev mode, OpenBao should automatically enable the secret mount
+	// Try to enable KV v2 secrets engine (if not already enabled)
+	// This will fail gracefully if the mount already exists
+	_, err := openbaoContainer.Client.Logical().Write("sys/mounts/secret", map[string]interface{}{
+		"type":        "kv-v2",
+		"description": "KV v2 secrets engine",
+	})
+	if err != nil {
+		// If error is that path is already in use, that's okay - mount already exists
+		// Also check for permission denied in case the mount exists but we can't modify it
+		// (which is fine, we can still use it)
+		if !strings.Contains(err.Error(), "path is already in use") &&
+			!strings.Contains(err.Error(), "permission denied") {
+			t.Fatalf("Failed to enable KV v2 secrets engine: %v", err)
+		}
+	}
+
+	_, err = openbaoContainer.Client.Logical().Write(fmt.Sprintf("secret/data/%s", openbaoPath), map[string]interface{}{
+		"data": secretData,
+	})
+	if err != nil {
+		t.Fatalf("Failed to write secret to OpenBao: %v", err)
 	}
 }
 
@@ -246,4 +337,3 @@ func VerifyGCSMSecretExists(ctx context.Context, t *testing.T, gcsmContainer *GC
 			"Please create it beforehand. See tests/end2end/GCSM_SETUP.md for instructions.", secretID)
 	}
 }
-
