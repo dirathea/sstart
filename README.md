@@ -17,7 +17,7 @@ You define all your required secrets from all your sources in a single, declarat
 
 ## Features
 
-- 🔐 **Multiple Secret Providers**: Support for 1Password, AWS Secrets Manager, Azure Key Vault, Bitwarden, HashiCorp Vault, GCP Secret Manager, dotenv files, and more
+- 🔐 **Multiple Secret Providers**: Support for 1Password, AWS Secrets Manager, Azure Key Vault, Bitwarden, Doppler, HashiCorp Vault, GCP Secret Manager, dotenv files, and more
 - 🔄 **Combine Secrets**: Merge secrets from multiple providers
 - 🚀 **Subprocess Execution**: Automatically inject secrets into subprocesses
 - 🔒 **Secure by Default**: Secrets never appear in shell history or logs

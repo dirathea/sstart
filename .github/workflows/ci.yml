@@ -73,6 +73,7 @@ jobs:
                 'internal/provider/aws/': ['TestE2E_AWSSecretsManager'],
                 'internal/provider/azurekeyvault/': ['TestE2E_AzureKeyVault'],
                 'internal/provider/bitwarden/': ['TestE2E_Bitwarden', 'TestE2E_BitwardenSM'],
+                'internal/provider/doppler/': ['TestE2E_Doppler'],
                 'internal/provider/gcsm/': ['TestE2E_GCSM'],
                 'internal/provider/infisical/': ['TestE2E_Infisical'],
                 'internal/provider/onepassword/': ['TestE2E_OnePassword'],

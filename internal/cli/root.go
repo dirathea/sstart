@@ -3,6 +3,7 @@ package cli
 import (
 	_ "github.com/dirathea/sstart/internal/provider/aws"
 	_ "github.com/dirathea/sstart/internal/provider/bitwarden"
+	_ "github.com/dirathea/sstart/internal/provider/doppler"
 	_ "github.com/dirathea/sstart/internal/provider/dotenv"
 	_ "github.com/dirathea/sstart/internal/provider/gcsm"
 	_ "github.com/dirathea/sstart/internal/provider/infisical"

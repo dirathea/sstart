@@ -28,6 +28,7 @@ providers:
 | `azure_keyvault` | Stable |
 | `bitwarden` | Stable |
 | `bitwarden_sm` | Stable |
+| `doppler` | Stable |
 | `dotenv` | Stable |
 | `gcloud_secretmanager` | Stable |
 | `infisical` | Stable |
@@ -209,6 +210,49 @@ If the secret value in Azure Key Vault is a JSON object, it will be automaticall
 If the secret value is plain text (not JSON), it will be mapped to a single environment variable named `<PROVIDER_ID>_SECRET` (where `<PROVIDER_ID>` is the provider's ID in uppercase, with hyphens converted to underscores). A warning will be logged indicating that the secret is not in JSON format.
 
 For example, if the provider ID is `aws-prod`, the secret will be loaded to `AWS_PROD_SECRET`.
+
+### Doppler (`doppler`)
+
+Retrieves secrets from Doppler, a secrets management platform. Supports fetching all secrets from a specific project and config (environment) combination.
+
+**Dependencies:**
+- No CLI required. Uses the Doppler REST API directly.
+
+**Configuration:**
+- `project` (required): The Doppler project name
+- `config` (required): The Doppler config/environment name (e.g., `dev`, `staging`, `prod`)
+- `api_host` (optional): The Doppler API host (defaults to `https://api.doppler.com`)
+
+**Authentication:**
+Doppler authentication must be provided via environment variable:
+- `DOPPLER_TOKEN` (required): Service token for Doppler API authentication
+
+**Example:**
+```yaml
+providers:
+  - kind: doppler
+    id: doppler-prod
+    project: myapp
+    config: production
+```
+
+Set environment variable:
+```bash
+export DOPPLER_TOKEN="your-service-token"
+```
+
+**How it works:**
+The provider uses the Doppler REST API to authenticate with Doppler using a service token. It fetches all secrets from the specified project and config combination, then makes them available as environment variables. Each secret key becomes an environment variable name.
+
+The provider uses Doppler's "computed" values, which automatically resolve secret references (e.g., `${USER}` or `${OTHER_SECRET}`) to their actual values. Doppler's auto-generated secrets (`DOPPLER_CONFIG`, `DOPPLER_ENVIRONMENT`, `DOPPLER_PROJECT`) are automatically excluded from the fetched secrets.
+
+**Service Token Setup:**
+To use this provider, you need:
+1. A Doppler account with a project and config set up
+2. A service token created in your Doppler project with read access to the config
+3. The service token must be set as the `DOPPLER_TOKEN` environment variable
+
+For more information on creating service tokens, see the [Doppler documentation](https://docs.doppler.com/docs/service-tokens).
 
 ### Dotenv (`dotenv`)
 
