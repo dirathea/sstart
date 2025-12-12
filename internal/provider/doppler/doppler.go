@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -70,9 +71,12 @@ func (p *DopplerProvider) Fetch(ctx context.Context, mapID string, config map[st
 		apiHost = "https://api.doppler.com"
 	}
 
-	// Build API URL
-	apiURL := fmt.Sprintf("%s/v3/configs/config/secrets/download?format=json&project=%s&config=%s",
-		apiHost, cfg.Project, cfg.Config)
+	// Build API URL with properly encoded query parameters
+	// According to Doppler API docs: https://docs.doppler.com/reference/api
+	// Use /v3/configs/config/secrets endpoint (not /download) to get detailed response
+	// Set include_managed_secrets=false to exclude Doppler's auto-generated secrets (DOPPLER_CONFIG, DOPPLER_ENVIRONMENT, DOPPLER_PROJECT)
+	apiURL := fmt.Sprintf("%s/v3/configs/config/secrets?project=%s&config=%s&include_managed_secrets=false",
+		apiHost, url.QueryEscape(cfg.Project), url.QueryEscape(cfg.Config))
 
 	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
@@ -103,51 +107,57 @@ func (p *DopplerProvider) Fetch(ctx context.Context, mapID string, config map[st
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// Parse JSON response
-	var secretData map[string]interface{}
-	if err := json.Unmarshal(body, &secretData); err != nil {
+	// Parse JSON response - expected structure:
+	// {
+	//   "secrets": {
+	//     "SECRET_NAME": {
+	//       "raw": "...",
+	//       "computed": "...",
+	//       "note": "",
+	//       "rawVisibility": "...",
+	//       "computedVisibility": "..."
+	//     }
+	//   }
+	// }
+	var response struct {
+		Secrets map[string]struct {
+			Raw                string `json:"raw"`
+			Computed           string `json:"computed"`
+			Note               string `json:"note"`
+			RawVisibility      string `json:"rawVisibility"`
+			ComputedVisibility string `json:"computedVisibility"`
+		} `json:"secrets"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
 	}
 
 	// Map keys according to configuration
+	// Use computed value as it resolves secret references (e.g., ${USER})
 	kvs := make([]provider.KeyValue, 0)
-	for k, v := range secretData {
-		targetKey := k
+	for secretName, secretInfo := range response.Secrets {
+		targetKey := secretName
 
 		// Check if there's a specific mapping
-		if mappedKey, exists := keys[k]; exists {
+		if mappedKey, exists := keys[secretName]; exists {
 			if mappedKey == "==" {
-				targetKey = k // Keep same name
+				targetKey = secretName // Keep same name
 			} else {
 				targetKey = mappedKey
 			}
 		} else if len(keys) == 0 {
 			// No keys specified means map everything
-			targetKey = k
+			targetKey = secretName
 		} else {
 			// Skip keys not in the mapping
 			continue
 		}
 
-		// Convert value to string
-		var value string
-		switch val := v.(type) {
-		case string:
-			value = val
-		case []byte:
-			value = string(val)
-		default:
-			// For complex types, JSON encode
-			jsonBytes, err := json.Marshal(val)
-			if err != nil {
-				return nil, fmt.Errorf("failed to serialize value for key '%s': %w", k, err)
-			}
-			value = string(jsonBytes)
-		}
-
+		// Use computed value (resolves references like ${USER})
 		kvs = append(kvs, provider.KeyValue{
 			Key:   targetKey,
-			Value: value,
+			Value: secretInfo.Computed,
 		})
 	}
 
@@ -169,4 +179,3 @@ func parseConfig(config map[string]interface{}) (*DopplerConfig, error) {
 
 	return &cfg, nil
 }
-

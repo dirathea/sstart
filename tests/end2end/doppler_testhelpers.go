@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -19,16 +20,21 @@ type DopplerClient struct {
 	authToken string
 }
 
-// DopplerSecret represents a secret in Doppler
-type DopplerSecret struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
-// DopplerSecretUpdate represents a secret update request
-type DopplerSecretUpdate struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
+// DopplerSecretsUpdateRequest represents the request body for updating secrets
+// According to Doppler API: https://docs.doppler.com/reference/secrets-update
+// The body format is:
+//
+//	{
+//	  "project": "PROJECT_NAME",
+//	  "config": "CONFIG_NAME",
+//	  "secrets": {
+//	    "SECRET_NAME": "secret_value"
+//	  }
+//	}
+type DopplerSecretsUpdateRequest struct {
+	Project string            `json:"project"`
+	Config  string            `json:"config"`
+	Secrets map[string]string `json:"secrets"`
 }
 
 // SetupDopplerClient creates and authenticates a Doppler client for testing
@@ -87,11 +93,19 @@ func SetupDopplerSecret(ctx context.Context, t *testing.T, client *DopplerClient
 	// Build API URL for updating a secret
 	apiURL := fmt.Sprintf("%s/v3/configs/config/secrets", client.apiHost)
 
-	// Create request body - Doppler expects an array of secret updates
-	updateReq := []DopplerSecretUpdate{
-		{
-			Name:  secretName,
-			Value: secretValue,
+	// Create request body according to Doppler API format:
+	// {
+	//   "project": "PROJECT_NAME",
+	//   "config": "CONFIG_NAME",
+	//   "secrets": {
+	//     "SECRET_NAME": "secret_value"
+	//   }
+	// }
+	updateReq := DopplerSecretsUpdateRequest{
+		Project: project,
+		Config:  config,
+		Secrets: map[string]string{
+			secretName: secretValue,
 		},
 	}
 
@@ -101,7 +115,9 @@ func SetupDopplerSecret(ctx context.Context, t *testing.T, client *DopplerClient
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "PATCH", apiURL, bytes.NewBuffer(jsonData))
+	// According to Doppler API docs: https://docs.doppler.com/reference/secrets-update
+	// The endpoint uses POST method
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -110,12 +126,6 @@ func SetupDopplerSecret(ctx context.Context, t *testing.T, client *DopplerClient
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", client.authToken))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-
-	// Add query parameters
-	q := req.URL.Query()
-	q.Add("project", project)
-	q.Add("config", config)
-	req.URL.RawQuery = q.Encode()
 
 	// Make HTTP request
 	resp, err := client.client.Do(req)
@@ -143,22 +153,29 @@ func SetupDopplerSecretsBatch(ctx context.Context, t *testing.T, client *Doppler
 	// Build API URL for updating secrets
 	apiURL := fmt.Sprintf("%s/v3/configs/config/secrets", client.apiHost)
 
-	// Build request body with all secrets
-	secretUpdates := make([]DopplerSecretUpdate, 0, len(secrets))
-	for name, value := range secrets {
-		secretUpdates = append(secretUpdates, DopplerSecretUpdate{
-			Name:  name,
-			Value: value,
-		})
+	// Build request body according to Doppler API format:
+	// {
+	//   "project": "PROJECT_NAME",
+	//   "config": "CONFIG_NAME",
+	//   "secrets": {
+	//     "SECRET_NAME": "secret_value"
+	//   }
+	// }
+	updateReq := DopplerSecretsUpdateRequest{
+		Project: project,
+		Config:  config,
+		Secrets: secrets,
 	}
 
-	jsonData, err := json.Marshal(secretUpdates)
+	jsonData, err := json.Marshal(updateReq)
 	if err != nil {
 		t.Fatalf("Failed to marshal secrets update request: %v", err)
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "PATCH", apiURL, bytes.NewBuffer(jsonData))
+	// According to Doppler API docs: https://docs.doppler.com/reference/secrets-update
+	// The endpoint uses POST method
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -167,12 +184,6 @@ func SetupDopplerSecretsBatch(ctx context.Context, t *testing.T, client *Doppler
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", client.authToken))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-
-	// Add query parameters
-	q := req.URL.Query()
-	q.Add("project", project)
-	q.Add("config", config)
-	req.URL.RawQuery = q.Encode()
 
 	// Make HTTP request
 	resp, err := client.client.Do(req)
@@ -188,30 +199,18 @@ func SetupDopplerSecretsBatch(ctx context.Context, t *testing.T, client *Doppler
 	}
 }
 
-// DeleteDopplerSecret deletes a secret from Doppler by setting it to empty value
-// Note: Doppler doesn't have a direct DELETE endpoint, so we set the value to empty
+// DeleteDopplerSecret deletes a secret from Doppler using the DELETE endpoint
+// According to Doppler API: https://docs.doppler.com/reference/configs-config-secret-delete
 func DeleteDopplerSecret(ctx context.Context, t *testing.T, client *DopplerClient, project, config, secretName string) {
 	t.Helper()
 
-	// Build API URL for updating a secret
-	apiURL := fmt.Sprintf("%s/v3/configs/config/secrets", client.apiHost)
-
-	// Create request body - set secret value to empty string to effectively "delete" it
-	updateReq := []DopplerSecretUpdate{
-		{
-			Name:  secretName,
-			Value: "", // Empty value to remove the secret
-		},
-	}
-
-	jsonData, err := json.Marshal(updateReq)
-	if err != nil {
-		t.Logf("Note: Could not marshal delete request for secret '%s': %v", secretName, err)
-		return
-	}
+	// Build API URL for deleting a secret
+	// Endpoint: /v3/configs/config/secret?project=PROJECT_NAME&config=CONFIG_NAME&name=SECRET_NAME
+	apiURL := fmt.Sprintf("%s/v3/configs/config/secret?project=%s&config=%s&name=%s",
+		client.apiHost, url.QueryEscape(project), url.QueryEscape(config), url.QueryEscape(secretName))
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "PATCH", apiURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "DELETE", apiURL, nil)
 	if err != nil {
 		t.Logf("Note: Could not create delete request for secret '%s': %v", secretName, err)
 		return
@@ -219,14 +218,7 @@ func DeleteDopplerSecret(ctx context.Context, t *testing.T, client *DopplerClien
 
 	// Set headers
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", client.authToken))
-	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-
-	// Add query parameters
-	q := req.URL.Query()
-	q.Add("project", project)
-	q.Add("config", config)
-	req.URL.RawQuery = q.Encode()
 
 	// Make HTTP request
 	resp, err := client.client.Do(req)
@@ -237,7 +229,8 @@ func DeleteDopplerSecret(ctx context.Context, t *testing.T, client *DopplerClien
 	defer resp.Body.Close()
 
 	// Log but don't fail - the secret might not exist, which is fine
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	// Accept both 200 OK and 204 No Content as success responses
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
 		t.Logf("Note: Could not delete secret '%s' from Doppler (status %d): %s", secretName, resp.StatusCode, string(body))
 	}
@@ -307,4 +300,3 @@ func VerifyDopplerSecretExists(ctx context.Context, t *testing.T, client *Dopple
 			"Please create it beforehand in your Doppler project.", secretName, project, config)
 	}
 }
-

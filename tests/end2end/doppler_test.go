@@ -35,7 +35,7 @@ func TestE2E_Doppler_WithKeys(t *testing.T) {
 	secretValue1 := "doppler-secret-api-key-12345"
 	secretKey2 := "DOPPLER_DB_PASSWORD"
 	secretValue2 := "doppler-secret-db-password"
-	secretKey3 := "DOPPLER_CONFIG"
+	secretKey3 := "DOPPLER_SECRET_VALUE"
 	secretValue3 := "doppler-config-value"
 
 	// Setup test secrets using batch create
@@ -127,7 +127,7 @@ func TestE2E_Doppler_NoKeys(t *testing.T) {
 	secretValue1 := "doppler-secret-api-key-67890"
 	secretKey2 := "DOPPLER_DB_PASSWORD"
 	secretValue2 := "doppler-secret-db-password"
-	secretKey3 := "DOPPLER_CONFIG"
+	secretKey3 := "DOPPLER_SECRET_VALUE"
 	secretValue3 := "doppler-config-value"
 
 	// Setup test secrets using batch create
@@ -223,4 +223,3 @@ func TestE2E_Doppler_VerifySecretExists(t *testing.T) {
 	// Verify the secret exists
 	VerifyDopplerSecretExists(ctx, t, client, project, dopplerConfig, secretKey)
 }
-

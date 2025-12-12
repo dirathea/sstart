@@ -244,6 +244,8 @@ export DOPPLER_TOKEN="your-service-token"
 **How it works:**
 The provider uses the Doppler REST API to authenticate with Doppler using a service token. It fetches all secrets from the specified project and config combination, then makes them available as environment variables. Each secret key becomes an environment variable name.
 
+The provider uses Doppler's "computed" values, which automatically resolve secret references (e.g., `${USER}` or `${OTHER_SECRET}`) to their actual values. Doppler's auto-generated secrets (`DOPPLER_CONFIG`, `DOPPLER_ENVIRONMENT`, `DOPPLER_PROJECT`) are automatically excluded from the fetched secrets.
+
 **Service Token Setup:**
 To use this provider, you need:
 1. A Doppler account with a project and config set up
