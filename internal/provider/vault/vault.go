@@ -319,5 +319,17 @@ func parseConfig(config map[string]interface{}) (*VaultConfig, error) {
 		cfg.SSOIDToken = idToken
 	}
 
+	// Support top-level 'token' field for backward compatibility with simpler configs
+	// e.g., `token: my-token` instead of `auth: { method: token, token: my-token }`
+	if token, ok := config["token"].(string); ok && token != "" {
+		if cfg.Auth == nil {
+			cfg.Auth = &VaultAuthConfig{}
+		}
+		// Only set if auth.token is not already set (explicit auth config takes precedence)
+		if cfg.Auth.Token == "" {
+			cfg.Auth.Token = token
+		}
+	}
+
 	return &cfg, nil
 }
