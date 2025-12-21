@@ -34,12 +34,12 @@ func GetSSOTestConfig(t *testing.T) (issuer, clientID, clientSecret, idToken, au
 
 	issuer = os.Getenv("SSTART_E2E_SSO_ISSUER")
 	if issuer == "" {
-		t.Skipf("Skipping test: SSTART_E2E_SSO_ISSUER environment variable is required")
+		t.Fatalf("SSTART_E2E_SSO_ISSUER environment variable is required")
 	}
 
 	clientID = os.Getenv("SSTART_E2E_SSO_CLIENT_ID")
 	if clientID == "" {
-		t.Skipf("Skipping test: SSTART_E2E_SSO_CLIENT_ID environment variable is required")
+		t.Fatalf("SSTART_E2E_SSO_CLIENT_ID environment variable is required")
 	}
 
 	clientSecret = os.Getenv("SSTART_E2E_SSO_CLIENT_SECRET")
@@ -47,7 +47,7 @@ func GetSSOTestConfig(t *testing.T) (issuer, clientID, clientSecret, idToken, au
 
 	idToken = os.Getenv("SSTART_E2E_SSO_ID_TOKEN")
 	if idToken == "" {
-		t.Skipf("Skipping test: SSTART_E2E_SSO_ID_TOKEN environment variable is required. " +
+		t.Fatalf("SSTART_E2E_SSO_ID_TOKEN environment variable is required. " +
 			"Obtain a token by running: sstart --force-auth show")
 	}
 
