@@ -35,6 +35,10 @@ func TestE2E_SSO_OpenBao_WithRealProvider(t *testing.T) {
 	// Get SSO configuration from environment
 	issuer, clientID, _, idToken, audience := GetSSOTestConfig(t)
 
+	// Setup tokens file to skip browser authentication in CI
+	cleanupTokens := SetupSSOTokensFile(t, idToken)
+	defer cleanupTokens()
+
 	// Setup OpenBao container
 	openbaoContainer := SetupOpenBao(ctx, t)
 	defer func() {
@@ -142,6 +146,10 @@ func TestE2E_SSO_OpenBao_WithCustomAuthMount(t *testing.T) {
 
 	// Get SSO configuration from environment
 	issuer, clientID, _, idToken, audience := GetSSOTestConfig(t)
+
+	// Setup tokens file to skip browser authentication in CI
+	cleanupTokens := SetupSSOTokensFile(t, idToken)
+	defer cleanupTokens()
 
 	// Setup OpenBao container
 	openbaoContainer := SetupOpenBao(ctx, t)
@@ -317,7 +325,14 @@ func TestE2E_SSO_OIDCClient_TokenStorage(t *testing.T) {
 }
 
 // TestE2E_SSO_FullFlow_WithForceAuth tests the full SSO flow including force auth flag
+// NOTE: This test requires interactive browser authentication and cannot run in CI
 func TestE2E_SSO_FullFlow_WithForceAuth(t *testing.T) {
+	// Skip this test in CI environments because force-auth always triggers browser login
+	// and cannot use cached tokens. The test is meant for local interactive testing only.
+	if os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+		t.Skip("Skipping force-auth test in CI environment - requires interactive browser authentication")
+	}
+
 	ctx := context.Background()
 
 	// Get SSO configuration from environment
@@ -401,4 +416,3 @@ providers:
 
 	t.Logf("Successfully tested SSO flow with force auth flag")
 }
-

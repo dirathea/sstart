@@ -2,9 +2,14 @@ package end2end
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/dirathea/sstart/internal/oidc"
 )
 
 // GetSSOTestConfig returns the SSO test configuration from environment variables
@@ -36,6 +41,82 @@ func GetSSOTestConfig(t *testing.T) (issuer, clientID, clientSecret, idToken, au
 	}
 
 	return
+}
+
+// SetupSSOTokensFile creates a tokens.json file with the provided ID token
+// This allows the OIDC client to find existing tokens and skip browser authentication
+// Returns a cleanup function that should be called via defer
+func SetupSSOTokensFile(t *testing.T, idToken string) func() {
+	t.Helper()
+
+	// Determine the token file path (same logic as in oidc/storage.go)
+	configHome := os.Getenv("XDG_CONFIG_HOME")
+	if configHome == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			t.Fatalf("Failed to get user home directory: %v", err)
+		}
+		configHome = filepath.Join(homeDir, ".config")
+	}
+
+	tokenDir := filepath.Join(configHome, oidc.ConfigDirName)
+	tokenPath := filepath.Join(tokenDir, oidc.TokenFileName)
+
+	// Check if tokens file already exists (don't overwrite user's real tokens)
+	existingTokens := false
+	if _, err := os.Stat(tokenPath); err == nil {
+		existingTokens = true
+		t.Logf("Existing tokens file found at %s, will restore after test", tokenPath)
+	}
+
+	var originalContent []byte
+	if existingTokens {
+		var err error
+		originalContent, err = os.ReadFile(tokenPath)
+		if err != nil {
+			t.Fatalf("Failed to read existing tokens file: %v", err)
+		}
+	}
+
+	// Create the directory if it doesn't exist
+	if err := os.MkdirAll(tokenDir, 0700); err != nil {
+		t.Fatalf("Failed to create token directory: %v", err)
+	}
+
+	// Create tokens with the provided ID token
+	// Set expiry to 1 hour from now to ensure it's considered valid
+	tokens := &oidc.Tokens{
+		IDToken:     idToken,
+		AccessToken: "test-access-token", // Dummy access token
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(1 * time.Hour),
+	}
+
+	data, err := json.MarshalIndent(tokens, "", "  ")
+	if err != nil {
+		t.Fatalf("Failed to marshal tokens: %v", err)
+	}
+
+	if err := os.WriteFile(tokenPath, data, 0600); err != nil {
+		t.Fatalf("Failed to write tokens file: %v", err)
+	}
+
+	t.Logf("Created SSO tokens file at %s for non-interactive testing", tokenPath)
+
+	// Return cleanup function
+	return func() {
+		if existingTokens {
+			// Restore original tokens
+			if err := os.WriteFile(tokenPath, originalContent, 0600); err != nil {
+				t.Logf("Warning: Failed to restore original tokens file: %v", err)
+			}
+		} else {
+			// Remove the tokens file we created
+			if err := os.Remove(tokenPath); err != nil && !os.IsNotExist(err) {
+				t.Logf("Warning: Failed to remove test tokens file: %v", err)
+			}
+		}
+	}
 }
 
 // SetupOpenBaoJWTAuthWithOIDCDiscovery configures JWT auth in OpenBao using OIDC discovery
