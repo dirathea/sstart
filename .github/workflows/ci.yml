@@ -1,8 +1,10 @@
 name: CI
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize]
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -14,8 +16,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v5

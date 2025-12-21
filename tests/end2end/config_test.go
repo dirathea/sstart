@@ -14,8 +14,8 @@ import (
 	_ "github.com/dirathea/sstart/internal/provider/vault"
 )
 
-// TestYAMLToProviderConfig_AllProviders tests the full flow from YAML config to provider config parsing
-func TestYAMLToProviderConfig_AllProviders(t *testing.T) {
+// TestE2E_Config_AllProviders tests the full flow from YAML config to provider config parsing
+func TestE2E_Config_AllProviders(t *testing.T) {
 	tests := []struct {
 		name           string
 		yamlContent    string
@@ -188,8 +188,8 @@ providers:
 	}
 }
 
-// TestYAMLToProviderConfig_ParseConfig tests that provider configs can be parsed after loading from YAML
-func TestYAMLToProviderConfig_ParseConfig(t *testing.T) {
+// TestE2E_Config_ParseConfig tests that provider configs can be parsed after loading from YAML
+func TestE2E_Config_ParseConfig(t *testing.T) {
 	tests := []struct {
 		name         string
 		yamlContent  string
@@ -312,8 +312,8 @@ providers:
 	}
 }
 
-// TestYAMLToProviderConfig_MultipleProviders tests YAML with multiple providers
-func TestYAMLToProviderConfig_MultipleProviders(t *testing.T) {
+// TestE2E_Config_MultipleProviders tests YAML with multiple providers
+func TestE2E_Config_MultipleProviders(t *testing.T) {
 	yamlContent := `
 providers:
   - kind: vault
@@ -391,8 +391,8 @@ providers:
 	}
 }
 
-// TestYAMLToProviderConfig_ProviderSpecificFields tests that provider-specific fields are properly isolated
-func TestYAMLToProviderConfig_ProviderSpecificFields(t *testing.T) {
+// TestE2E_Config_ProviderSpecificFields tests that provider-specific fields are properly isolated
+func TestE2E_Config_ProviderSpecificFields(t *testing.T) {
 	yamlContent := `
 providers:
   - kind: vault
@@ -456,8 +456,8 @@ providers:
 	}
 }
 
-// TestYAMLToProviderConfig_WithKeys tests that keys mapping is properly extracted
-func TestYAMLToProviderConfig_WithKeys(t *testing.T) {
+// TestE2E_Config_WithKeys tests that keys mapping is properly extracted
+func TestE2E_Config_WithKeys(t *testing.T) {
 	yamlContent := `
 providers:
   - kind: vault
@@ -519,9 +519,9 @@ providers:
 	}
 }
 
-// TestYAMLToProviderConfig_ProviderParseConfig tests that providers can parse configs loaded from YAML
+// TestE2E_Config_ProviderParseConfig tests that providers can parse configs loaded from YAML
 // This verifies the end-to-end flow: YAML -> Config -> Provider.Config -> Provider parsing
-func TestYAMLToProviderConfig_ProviderParseConfig(t *testing.T) {
+func TestE2E_Config_ProviderParseConfig(t *testing.T) {
 	tests := []struct {
 		name           string
 		yamlContent    string
@@ -681,8 +681,8 @@ providers:
 	}
 }
 
-// TestSSOConfig_Load tests that SSO configuration can be loaded from YAML
-func TestSSOConfig_Load(t *testing.T) {
+// TestE2E_Config_SSOConfig_Load tests that SSO configuration can be loaded from YAML
+func TestE2E_Config_SSOConfig_Load(t *testing.T) {
 	tests := []struct {
 		name          string
 		yamlContent   string
