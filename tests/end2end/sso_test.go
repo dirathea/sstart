@@ -134,40 +134,60 @@ func TestE2E_SSO_OIDCClient_TokenStorage(t *testing.T) {
 func TestE2E_SSO_ClientCredentialsFlow(t *testing.T) {
 	ctx := context.Background()
 
+	t.Log("========================================")
+	t.Log("TestE2E_SSO_ClientCredentialsFlow START")
+	t.Log("========================================")
+
 	// Get SSO configuration from environment
 	issuer, clientID, clientSecret, audience := GetSSOTestConfig(t)
 
+	// Verify OIDC discovery endpoint is accessible
+	t.Log("--- Verifying OIDC Provider Accessibility ---")
+	tokenEndpoint := VerifyOIDCDiscovery(t, issuer)
+	if tokenEndpoint == "" {
+		t.Log("WARNING: Could not verify OIDC discovery endpoint")
+	}
+
 	// Set the client secret via environment variable (this is the only supported way)
+	t.Logf("Setting %s environment variable...", oidc.SSOSecretEnvVar)
 	t.Setenv(oidc.SSOSecretEnvVar, clientSecret)
 
 	// Setup OpenBao container
+	t.Log("--- Setting up OpenBao Container ---")
 	openbaoContainer := SetupOpenBao(ctx, t)
 	defer func() {
 		if err := openbaoContainer.Cleanup(); err != nil {
 			t.Errorf("Failed to terminate OpenBao container: %v", err)
 		}
 	}()
+	t.Logf("OpenBao container started at: %s", openbaoContainer.Address)
 
 	// Create a policy that allows reading secrets
+	t.Log("--- Creating OpenBao Policy ---")
 	policyHCL := `
 path "secret/data/*" {
   capabilities = ["read", "list"]
 }
 `
 	SetupOpenBaoPolicy(ctx, t, openbaoContainer, "client-creds-reader", policyHCL)
+	t.Log("Policy 'client-creds-reader' created successfully")
 
 	// Setup JWT auth with OIDC discovery from the real provider
+	t.Log("--- Setting up JWT Auth with OIDC Discovery ---")
 	SetupOpenBaoJWTAuthWithOIDCDiscovery(ctx, t, openbaoContainer, issuer, audience, "client-creds-role", []string{"client-creds-reader"})
 
 	// Write test secret to OpenBao
+	t.Log("--- Writing Test Secret to OpenBao ---")
 	secretPath := "client-creds-test/config"
 	secretData := map[string]interface{}{
 		"CLIENT_CREDS_API_KEY": "client-creds-secret-api-key-12345",
 		"CLIENT_CREDS_SECRET":  "client-creds-secret-value",
 	}
 	SetupOpenBaoSecret(ctx, t, openbaoContainer, secretPath, secretData)
+	t.Logf("Test secret written to path: %s", secretPath)
 
 	// Create temporary config file with SSO configuration (client secret comes from env var)
+	t.Log("--- Creating sstart Config File ---")
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, ".sstart.yml")
 
@@ -192,33 +212,56 @@ providers:
       role: client-creds-role
 `, clientID, issuer, secretPath, openbaoContainer.Address)
 
+	t.Logf("Config file path: %s", configFile)
+	t.Log("Config content (client secret comes from env):")
+	t.Log(configYAML)
+
 	if err := os.WriteFile(configFile, []byte(configYAML), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
 	}
 
 	// Load config
+	t.Log("--- Loading Config ---")
 	cfg, err := config.Load(configFile)
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
+	t.Log("Config loaded successfully")
 
 	// Verify the OIDC client detects it has client credentials
+	t.Log("--- Creating OIDC Client ---")
 	oidcClient, err := oidc.NewClient(cfg.SSO.OIDC)
 	if err != nil {
 		t.Fatalf("Failed to create OIDC client: %v", err)
 	}
 
-	if !oidcClient.HasClientCredentials() {
+	hasClientCreds := oidcClient.HasClientCredentials()
+	t.Logf("OIDC client has client credentials: %v", hasClientCreds)
+	if !hasClientCreds {
 		t.Fatalf("Expected OIDC client to have client credentials, but it does not")
 	}
 
 	// Create collector and collect secrets
 	// This should use client credentials flow automatically (non-interactive)
+	t.Log("--- Collecting Secrets (Client Credentials Flow) ---")
+	t.Log("This will attempt to:")
+	t.Log("  1. Get access token from OIDC provider using client credentials")
+	t.Log("  2. Use that token to authenticate to OpenBao via JWT auth")
+	t.Log("  3. Read the secret from OpenBao")
+
 	collector := secrets.NewCollector(cfg)
 	collectedSecrets, err := collector.Collect(ctx, nil)
 	if err != nil {
+		t.Log("=== SECRET COLLECTION FAILED ===")
+		t.Logf("Error: %v", err)
+		t.Log("This likely means:")
+		t.Log("  - Client ID/Secret mismatch with OIDC provider")
+		t.Log("  - Client not configured for client_credentials grant")
+		t.Log("  - Network issue reaching OIDC provider")
+		t.Log("================================")
 		t.Fatalf("Failed to collect secrets using client credentials flow: %v", err)
 	}
+	t.Log("Secrets collected successfully!")
 
 	// Verify secrets
 	expectedSecrets := map[string]string{
