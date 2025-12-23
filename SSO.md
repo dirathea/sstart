@@ -401,14 +401,34 @@ bao policy write sstart-policy sstart-policy.hcl
 
 #### Zitadel Configuration
 
-1. Create an application in Zitadel:
-   - **For interactive use**: Application Type: Native (PKCE enabled)
-   - **For CI/CD**: Application Type: Machine-to-machine or Service Account with client credentials
-   - Redirect URI: `http://localhost:5747/auth/sstart` (for interactive)
+**Important**: Zitadel has different application types with different capabilities:
 
-2. Note your Client ID (e.g., `351633448147908967`)
+| Application Type | Client Credentials Flow | Interactive Flow | Use Case |
+|------------------|------------------------|------------------|----------|
+| **Web App** | ❌ Not supported | ✅ Yes | Browser-based applications |
+| **Native App** | ❌ Not supported | ✅ Yes (PKCE) | CLI tools, mobile apps |
+| **Service User** | ✅ Yes | ❌ No | CI/CD, automated pipelines |
 
-3. For CI/CD: Generate a client secret
+**For interactive use (local development)**:
+1. Create a **Native App** in Zitadel
+2. Enable PKCE (usually default)
+3. Set Redirect URI: `http://localhost:5747/auth/sstart`
+
+**For CI/CD (client credentials flow)**:
+1. Go to **Users** → **Service Users** → **+ New**
+2. Create a service user with:
+   - User Name: `sstart-ci` (or any name)
+   - Access Token Type: **JWT**
+3. After creation, go to the service user → **Actions** → **Generate Client Secret**
+4. Copy the **User ID** (this is your Client ID) and **Client Secret**
+
+> ⚠️ **Common Mistake**: Web Apps in Zitadel do NOT support `client_credentials` grant type. The grant type options (Implicit, Device Code, Refresh Token, Token Exchange) do not include Client Credentials. You MUST use a Service User for CI/CD.
+
+2. Note your Client ID:
+   - For Web/Native Apps: The Application's Client ID
+   - For Service Users: The User ID (found in user details)
+
+3. For CI/CD: The client secret from the Service User
 
 #### OpenBao/Vault Configuration
 
@@ -468,6 +488,84 @@ export SSTART_SSO_SECRET="your-client-secret"
 sstart show
 ```
 
+## Testing SSO (For Contributors)
+
+The SSO end-to-end tests require a real OIDC provider. We use Zitadel for testing.
+
+### Required Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `SSTART_E2E_SSO_ISSUER` | OIDC issuer URL (e.g., `https://your-instance.zitadel.cloud`) |
+| `SSTART_E2E_SSO_CLIENT_ID` | Zitadel Service User ID |
+| `SSTART_E2E_SSO_CLIENT_SECRET` | Zitadel Service User client secret |
+| `SSTART_E2E_SSO_AUDIENCE` | (Optional) Expected audience, defaults to client ID |
+
+### Setting Up Zitadel for Testing
+
+1. **Create a Zitadel instance** at [zitadel.cloud](https://zitadel.cloud) (free tier available)
+
+2. **Create a Service User** (NOT a Web App!):
+   ```
+   Users → Service Users → + New
+   - User Name: sstart-e2e-test
+   - Access Token Type: JWT
+   ```
+
+3. **Generate a Client Secret**:
+   ```
+   Click on the service user → Actions → Generate Client Secret
+   ```
+
+4. **Set environment variables**:
+   ```bash
+   export SSTART_E2E_SSO_ISSUER="https://your-instance.zitadel.cloud"
+   export SSTART_E2E_SSO_CLIENT_ID="<service user id>"
+   export SSTART_E2E_SSO_CLIENT_SECRET="<generated client secret>"
+   ```
+
+### Running SSO Tests
+
+```bash
+# Run all SSO tests
+go test -v ./tests/end2end -run TestE2E_SSO_
+
+# Run a specific test
+go test -v ./tests/end2end -run TestE2E_SSO_ClientCredentialsFlow
+```
+
+### Common Testing Issues
+
+#### "client not found" Error
+
+This usually means you're using a **Web App** instead of a **Service User**. Web Apps in Zitadel don't support `client_credentials` grant type.
+
+**Solution**: Create a Service User as described above.
+
+#### Test Pollution / Flaky Tests
+
+The token storage uses a global keyring location. If tests fail intermittently, leftover tokens from previous tests might be interfering.
+
+**Solution**: The tests include cleanup logic, but if issues persist:
+```bash
+# macOS: Clear keyring tokens
+security delete-generic-password -s sstart -a sso-tokens
+
+# Linux: Clear file-based tokens
+rm ~/.config/sstart/tokens.json
+```
+
+### CI/CD Configuration
+
+For GitHub Actions, store the SSO credentials in your secrets manager (e.g., Infisical) and inject them during the workflow:
+
+```yaml
+env:
+  SSTART_E2E_SSO_ISSUER: ${{ env.SSTART_E2E_SSO_ISSUER }}
+  SSTART_E2E_SSO_CLIENT_ID: ${{ env.SSTART_E2E_SSO_CLIENT_ID }}
+  SSTART_E2E_SSO_CLIENT_SECRET: ${{ env.SSTART_E2E_SSO_CLIENT_SECRET }}
+```
+
 ## Troubleshooting
 
 ### Browser Doesn't Open
@@ -521,6 +619,18 @@ If the client credentials flow fails, check:
 1. **Client secret is correct**: Verify `SSTART_SSO_SECRET` is set correctly
 2. **Grant type enabled**: Ensure your OIDC client has `client_credentials` grant type enabled
 3. **Scopes allowed**: Some providers require specific scopes for client credentials
+
+#### Zitadel: "client not found" Error
+
+This error means you're using a Web App or Native App, which don't support client credentials flow.
+
+**Solution**: Use a **Service User** instead:
+1. Go to **Users** → **Service Users** → **+ New**
+2. Create the service user
+3. Generate a **Client Secret** for it
+4. Use the **User ID** as your Client ID
+
+Web Apps in Zitadel only support these grant types: Implicit, Device Code, Refresh Token, Token Exchange — NOT Client Credentials.
 
 ### Vault "permission denied" Error
 
