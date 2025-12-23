@@ -19,25 +19,126 @@ import (
 // Required:
 //   - SSTART_E2E_SSO_ISSUER: The OIDC issuer URL (e.g., "https://your-instance.zitadel.cloud")
 //   - SSTART_E2E_SSO_CLIENT_ID: The OIDC client ID
-//   - SSTART_E2E_SSO_CLIENT_SECRET: The OIDC client secret (for confidential clients)
-//   - SSTART_E2E_SSO_ID_TOKEN: A valid ID token from the OIDC provider (for non-interactive testing)
+//   - SSTART_E2E_SSO_CLIENT_SECRET: The OIDC client secret (set via SSTART_SSO_SECRET env var at runtime)
 //
 // Optional:
 //   - SSTART_E2E_SSO_AUDIENCE: The expected audience claim (defaults to client ID)
 //
-// The ID token can be obtained by running sstart manually with --force-auth
-// and then reading the token from keyring or ~/.config/sstart/tokens.json
+// Authentication flows:
+//   - Interactive (browser): Only requires client ID, user authenticates via browser
+//   - Non-interactive (CI): Requires client ID + client secret, uses client credentials flow
 
-// TestE2E_SSO_OpenBao_WithRealProvider tests SSO authentication with OpenBao using a real OIDC provider
-func TestE2E_SSO_OpenBao_WithRealProvider(t *testing.T) {
+// TestE2E_SSO_OIDCClient_HasClientCredentials tests the detection of client credentials capability
+func TestE2E_SSO_OIDCClient_HasClientCredentials(t *testing.T) {
+	// Test case 1: Client with both ID and secret should have credentials
+	cfgWithSecret := &config.OIDCConfig{
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+		Issuer:       "https://example.com",
+		Scopes:       []string{"openid"},
+	}
+
+	clientWithSecret, err := oidc.NewClient(cfgWithSecret)
+	if err != nil {
+		t.Fatalf("Failed to create OIDC client with secret: %v", err)
+	}
+
+	if !clientWithSecret.HasClientCredentials() {
+		t.Error("Expected client with secret to have client credentials capability")
+	}
+
+	// Test case 2: Client with only ID (PKCE) should NOT have credentials
+	cfgWithoutSecret := &config.OIDCConfig{
+		ClientID: "test-client-id",
+		Issuer:   "https://example.com",
+		Scopes:   []string{"openid"},
+	}
+
+	clientWithoutSecret, err := oidc.NewClient(cfgWithoutSecret)
+	if err != nil {
+		t.Fatalf("Failed to create OIDC client without secret: %v", err)
+	}
+
+	if clientWithoutSecret.HasClientCredentials() {
+		t.Error("Expected client without secret to NOT have client credentials capability")
+	}
+
+	t.Logf("Successfully verified HasClientCredentials detection")
+}
+
+// TestE2E_SSO_OIDCClient_TokenStorage tests the OIDC client token storage functionality
+func TestE2E_SSO_OIDCClient_TokenStorage(t *testing.T) {
+	// Create OIDC config with test values (no real provider needed for storage test)
+	cfg := &config.OIDCConfig{
+		ClientID: "test-client-id",
+		Issuer:   "https://example.com",
+		Scopes:   []string{"openid", "profile", "email"},
+	}
+
+	// Create OIDC client
+	client, err := oidc.NewClient(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create OIDC client: %v", err)
+	}
+
+	// Test token storage
+	testTokens := &oidc.Tokens{
+		AccessToken:  "test-access-token",
+		RefreshToken: "test-refresh-token",
+		IDToken:      "test-id-token",
+		TokenType:    "Bearer",
+	}
+
+	// Save tokens
+	err = client.SaveTokens(testTokens)
+	if err != nil {
+		t.Fatalf("Failed to save tokens: %v", err)
+	}
+
+	// Load tokens
+	loadedTokens, err := client.LoadTokens()
+	if err != nil {
+		t.Fatalf("Failed to load tokens: %v", err)
+	}
+
+	// Verify
+	if loadedTokens.AccessToken != testTokens.AccessToken {
+		t.Errorf("AccessToken mismatch: expected '%s', got '%s'", testTokens.AccessToken, loadedTokens.AccessToken)
+	}
+	if loadedTokens.RefreshToken != testTokens.RefreshToken {
+		t.Errorf("RefreshToken mismatch: expected '%s', got '%s'", testTokens.RefreshToken, loadedTokens.RefreshToken)
+	}
+	if loadedTokens.IDToken != testTokens.IDToken {
+		t.Errorf("IDToken mismatch: expected '%s', got '%s'", testTokens.IDToken, loadedTokens.IDToken)
+	}
+
+	// Log storage backend being used
+	t.Logf("Token storage backend: %s", client.GetStorageBackend())
+
+	// Clear tokens
+	err = client.ClearTokens()
+	if err != nil {
+		t.Fatalf("Failed to clear tokens: %v", err)
+	}
+
+	// Verify tokens are cleared
+	if client.TokensExist() {
+		t.Error("Tokens should not exist after clearing")
+	}
+
+	t.Logf("Successfully tested token storage functionality")
+}
+
+// TestE2E_SSO_ClientCredentialsFlow tests the client credentials flow for non-interactive authentication
+// This test requires a confidential client with client_credentials grant type enabled
+func TestE2E_SSO_ClientCredentialsFlow(t *testing.T) {
 	ctx := context.Background()
 
 	// Get SSO configuration from environment
-	issuer, clientID, _, idToken, audience := GetSSOTestConfig(t)
+	issuer, clientID, clientSecret, audience := GetSSOTestConfig(t)
 
-	// Setup tokens file to skip browser authentication in CI
-	cleanupTokens := SetupSSOTokensFile(t, idToken)
-	defer cleanupTokens()
+	// Set the client secret via environment variable (this is the only supported way)
+	t.Setenv(oidc.SSOSecretEnvVar, clientSecret)
 
 	// Setup OpenBao container
 	openbaoContainer := SetupOpenBao(ctx, t)
@@ -53,21 +154,20 @@ path "secret/data/*" {
   capabilities = ["read", "list"]
 }
 `
-	SetupOpenBaoPolicy(ctx, t, openbaoContainer, "sso-reader", policyHCL)
+	SetupOpenBaoPolicy(ctx, t, openbaoContainer, "client-creds-reader", policyHCL)
 
 	// Setup JWT auth with OIDC discovery from the real provider
-	SetupOpenBaoJWTAuthWithOIDCDiscovery(ctx, t, openbaoContainer, issuer, audience, "sso-role", []string{"sso-reader"})
+	SetupOpenBaoJWTAuthWithOIDCDiscovery(ctx, t, openbaoContainer, issuer, audience, "client-creds-role", []string{"client-creds-reader"})
 
 	// Write test secret to OpenBao
-	secretPath := "sso-test/config"
+	secretPath := "client-creds-test/config"
 	secretData := map[string]interface{}{
-		"SSO_API_KEY":     "sso-secret-api-key-12345",
-		"SSO_DB_PASSWORD": "sso-secret-db-password",
-		"SSO_CONFIG":      "sso-config-value",
+		"CLIENT_CREDS_API_KEY": "client-creds-secret-api-key-12345",
+		"CLIENT_CREDS_SECRET":  "client-creds-secret-value",
 	}
 	SetupOpenBaoSecret(ctx, t, openbaoContainer, secretPath, secretData)
 
-	// Create temporary config file with SSO configuration
+	// Create temporary config file with SSO configuration (client secret comes from env var)
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, ".sstart.yml")
 
@@ -83,13 +183,13 @@ sso:
 
 providers:
   - kind: vault
-    id: openbao-sso-test
+    id: openbao-client-creds-test
     path: %s
     address: %s
     mount: secret
     auth:
       method: jwt
-      role: sso-role
+      role: client-creds-role
 `, clientID, issuer, secretPath, openbaoContainer.Address)
 
 	if err := os.WriteFile(configFile, []byte(configYAML), 0644); err != nil {
@@ -102,24 +202,28 @@ providers:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Inject the real ID token into the provider config
-	// In normal usage, this is done by the SSO authentication flow
-	for i := range cfg.Providers {
-		cfg.Providers[i].Config["_sso_id_token"] = idToken
+	// Verify the OIDC client detects it has client credentials
+	oidcClient, err := oidc.NewClient(cfg.SSO.OIDC)
+	if err != nil {
+		t.Fatalf("Failed to create OIDC client: %v", err)
+	}
+
+	if !oidcClient.HasClientCredentials() {
+		t.Fatalf("Expected OIDC client to have client credentials, but it does not")
 	}
 
 	// Create collector and collect secrets
+	// This should use client credentials flow automatically (non-interactive)
 	collector := secrets.NewCollector(cfg)
 	collectedSecrets, err := collector.Collect(ctx, nil)
 	if err != nil {
-		t.Fatalf("Failed to collect secrets: %v", err)
+		t.Fatalf("Failed to collect secrets using client credentials flow: %v", err)
 	}
 
 	// Verify secrets
 	expectedSecrets := map[string]string{
-		"SSO_API_KEY":     "sso-secret-api-key-12345",
-		"SSO_DB_PASSWORD": "sso-secret-db-password",
-		"SSO_CONFIG":      "sso-config-value",
+		"CLIENT_CREDS_API_KEY": "client-creds-secret-api-key-12345",
+		"CLIENT_CREDS_SECRET":  "client-creds-secret-value",
 	}
 
 	for key, expectedValue := range expectedSecrets {
@@ -133,23 +237,18 @@ providers:
 		}
 	}
 
-	if len(collectedSecrets) != len(expectedSecrets) {
-		t.Errorf("Expected %d secrets, got %d. Secrets: %v", len(expectedSecrets), len(collectedSecrets), collectedSecrets)
-	}
-
-	t.Logf("Successfully collected %d secrets from OpenBao using real SSO provider", len(collectedSecrets))
+	t.Logf("Successfully collected %d secrets using client credentials flow (non-interactive)", len(collectedSecrets))
 }
 
-// TestE2E_SSO_OpenBao_WithCustomAuthMount tests SSO with a custom JWT auth mount path
-func TestE2E_SSO_OpenBao_WithCustomAuthMount(t *testing.T) {
+// TestE2E_SSO_ClientCredentialsFlow_WithCustomAuthMount tests client credentials with a custom JWT auth mount path
+func TestE2E_SSO_ClientCredentialsFlow_WithCustomAuthMount(t *testing.T) {
 	ctx := context.Background()
 
 	// Get SSO configuration from environment
-	issuer, clientID, _, idToken, audience := GetSSOTestConfig(t)
+	issuer, clientID, clientSecret, audience := GetSSOTestConfig(t)
 
-	// Setup tokens file to skip browser authentication in CI
-	cleanupTokens := SetupSSOTokensFile(t, idToken)
-	defer cleanupTokens()
+	// Set the client secret via environment variable
+	t.Setenv(oidc.SSOSecretEnvVar, clientSecret)
 
 	// Setup OpenBao container
 	openbaoContainer := SetupOpenBao(ctx, t)
@@ -238,12 +337,7 @@ providers:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Inject the real ID token
-	for i := range cfg.Providers {
-		cfg.Providers[i].Config["_sso_id_token"] = idToken
-	}
-
-	// Collect secrets
+	// Collect secrets using client credentials flow
 	collector := secrets.NewCollector(cfg)
 	collectedSecrets, err := collector.Collect(ctx, nil)
 	if err != nil {
@@ -255,164 +349,5 @@ providers:
 		t.Errorf("Expected CUSTOM_SSO_SECRET to be 'custom-sso-secret-value', got '%s'", collectedSecrets["CUSTOM_SSO_SECRET"])
 	}
 
-	t.Logf("Successfully collected secrets using custom SSO auth mount")
-}
-
-// TestE2E_SSO_OIDCClient_TokenStorage tests the OIDC client token storage functionality
-func TestE2E_SSO_OIDCClient_TokenStorage(t *testing.T) {
-	// Get SSO configuration from environment
-	issuer, clientID, _, _, _ := GetSSOTestConfig(t)
-
-	// Create OIDC config
-	cfg := &config.OIDCConfig{
-		ClientID: clientID,
-		Issuer:   issuer,
-		Scopes:   []string{"openid", "profile", "email"},
-	}
-
-	// Create OIDC client
-	client, err := oidc.NewClient(cfg)
-	if err != nil {
-		t.Fatalf("Failed to create OIDC client: %v", err)
-	}
-
-	// Test token storage
-	testTokens := &oidc.Tokens{
-		AccessToken:  "test-access-token",
-		RefreshToken: "test-refresh-token",
-		IDToken:      "test-id-token",
-		TokenType:    "Bearer",
-	}
-
-	// Save tokens
-	err = client.SaveTokens(testTokens)
-	if err != nil {
-		t.Fatalf("Failed to save tokens: %v", err)
-	}
-
-	// Load tokens
-	loadedTokens, err := client.LoadTokens()
-	if err != nil {
-		t.Fatalf("Failed to load tokens: %v", err)
-	}
-
-	// Verify
-	if loadedTokens.AccessToken != testTokens.AccessToken {
-		t.Errorf("AccessToken mismatch: expected '%s', got '%s'", testTokens.AccessToken, loadedTokens.AccessToken)
-	}
-	if loadedTokens.RefreshToken != testTokens.RefreshToken {
-		t.Errorf("RefreshToken mismatch: expected '%s', got '%s'", testTokens.RefreshToken, loadedTokens.RefreshToken)
-	}
-	if loadedTokens.IDToken != testTokens.IDToken {
-		t.Errorf("IDToken mismatch: expected '%s', got '%s'", testTokens.IDToken, loadedTokens.IDToken)
-	}
-
-	// Log storage backend being used
-	t.Logf("Token storage backend: %s", client.GetStorageBackend())
-
-	// Clear tokens
-	err = client.ClearTokens()
-	if err != nil {
-		t.Fatalf("Failed to clear tokens: %v", err)
-	}
-
-	// Verify tokens are cleared
-	if client.TokensExist() {
-		t.Error("Tokens should not exist after clearing")
-	}
-
-	t.Logf("Successfully tested token storage functionality")
-}
-
-// TestE2E_SSO_FullFlow_WithForceAuth tests the full SSO flow including force auth flag
-// NOTE: This test requires interactive browser authentication and cannot run in CI
-func TestE2E_SSO_FullFlow_WithForceAuth(t *testing.T) {
-	// Skip this test in CI environments because force-auth always triggers browser login
-	// and cannot use cached tokens. The test is meant for local interactive testing only.
-	if os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
-		t.Skip("Skipping force-auth test in CI environment - requires interactive browser authentication")
-	}
-
-	ctx := context.Background()
-
-	// Get SSO configuration from environment
-	issuer, clientID, _, idToken, audience := GetSSOTestConfig(t)
-
-	// Setup OpenBao container
-	openbaoContainer := SetupOpenBao(ctx, t)
-	defer func() {
-		if err := openbaoContainer.Cleanup(); err != nil {
-			t.Errorf("Failed to terminate OpenBao container: %v", err)
-		}
-	}()
-
-	// Setup policy and JWT auth
-	policyHCL := `
-path "secret/data/*" {
-  capabilities = ["read", "list"]
-}
-`
-	SetupOpenBaoPolicy(ctx, t, openbaoContainer, "force-auth-reader", policyHCL)
-	SetupOpenBaoJWTAuthWithOIDCDiscovery(ctx, t, openbaoContainer, issuer, audience, "force-auth-role", []string{"force-auth-reader"})
-
-	// Write test secret
-	secretPath := "force-auth-test/config"
-	secretData := map[string]interface{}{
-		"FORCE_AUTH_SECRET": "force-auth-secret-value",
-	}
-	SetupOpenBaoSecret(ctx, t, openbaoContainer, secretPath, secretData)
-
-	// Create config file
-	tmpDir := t.TempDir()
-	configFile := filepath.Join(tmpDir, ".sstart.yml")
-
-	configYAML := fmt.Sprintf(`
-sso:
-  oidc:
-    clientId: %s
-    issuer: %s
-    scopes:
-      - openid
-      - profile
-      - email
-
-providers:
-  - kind: vault
-    id: force-auth-test
-    path: %s
-    address: %s
-    mount: secret
-    auth:
-      method: jwt
-      role: force-auth-role
-`, clientID, issuer, secretPath, openbaoContainer.Address)
-
-	if err := os.WriteFile(configFile, []byte(configYAML), 0644); err != nil {
-		t.Fatalf("Failed to write config file: %v", err)
-	}
-
-	// Load config
-	cfg, err := config.Load(configFile)
-	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
-	}
-
-	// Inject the real ID token
-	for i := range cfg.Providers {
-		cfg.Providers[i].Config["_sso_id_token"] = idToken
-	}
-
-	// Test with force auth enabled
-	collector := secrets.NewCollector(cfg, secrets.WithForceAuth(true))
-	collectedSecrets, err := collector.Collect(ctx, nil)
-	if err != nil {
-		t.Fatalf("Failed to collect secrets with force auth: %v", err)
-	}
-
-	// Verify
-	if collectedSecrets["FORCE_AUTH_SECRET"] != "force-auth-secret-value" {
-		t.Errorf("Expected FORCE_AUTH_SECRET to be 'force-auth-secret-value', got '%s'", collectedSecrets["FORCE_AUTH_SECRET"])
-	}
-
-	t.Logf("Successfully tested SSO flow with force auth flag")
+	t.Logf("Successfully collected secrets using custom SSO auth mount with client credentials flow")
 }

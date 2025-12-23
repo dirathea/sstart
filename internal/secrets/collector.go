@@ -130,7 +130,22 @@ func (c *Collector) authenticateSSO(ctx context.Context) error {
 		// Token expired or invalid, need to re-authenticate
 	}
 
-	// Initiate login flow
+	// If client credentials are configured, use client credentials flow (non-interactive)
+	// This is for CI/CD and service accounts - never fall back to browser
+	if c.ssoClient.HasClientCredentials() {
+		result, err := c.ssoClient.LoginWithClientCredentials(ctx)
+		if err != nil {
+			return fmt.Errorf("client credentials authentication failed: %w", err)
+		}
+		// Store tokens
+		if result.Tokens != nil {
+			c.accessToken = result.Tokens.AccessToken
+			c.idToken = result.Tokens.IDToken
+		}
+		return nil
+	}
+
+	// No client secret configured - use interactive login flow (browser-based)
 	result, err := c.ssoClient.Login(ctx)
 	if err != nil {
 		return err

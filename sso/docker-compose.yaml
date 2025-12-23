@@ -1,0 +1,35 @@
+services:
+  openbao:
+    labels:
+      dev.orbstack.http-port: "8200"
+    image: openbao/openbao:latest
+    ports:
+      - "8200:8200"
+    environment:
+      - BAO_DEV_ROOT_TOKEN_ID=openbao
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  openbao-manager:
+    image: openbao/openbao:latest
+    depends_on:
+      openbao:
+        condition: service_healthy
+    environment:
+      - BAO_ADDR=http://openbao:8200
+      - BAO_TOKEN=openbao
+      # SSO Configuration (override these with your own values)
+      - OIDC_ISSUER=${OIDC_ISSUER:-https://sstart-8fucai.us1.zitadel.cloud}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-351633448147908967}
+      - JWT_ROLE=${JWT_ROLE:-sstart}
+      - JWT_POLICY=${JWT_POLICY:-sstart-policy}
+    volumes:
+      - ./init-openbao.sh:/init-openbao.sh:ro
+    entrypoint: ["/bin/sh", "/init-openbao.sh"]
+    restart: "no"

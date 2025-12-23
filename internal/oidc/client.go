@@ -2,10 +2,14 @@ package oidc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dirathea/sstart/internal/config"
@@ -62,6 +66,22 @@ type AuthResult struct {
 // SSOSecretEnvVar is the environment variable name for the OIDC client secret
 const SSOSecretEnvVar = "SSTART_SSO_SECRET"
 
+// oidcDiscoveryResponse represents the OIDC discovery document
+type oidcDiscoveryResponse struct {
+	TokenEndpoint string `json:"token_endpoint"`
+	Issuer        string `json:"issuer"`
+}
+
+// tokenResponse represents the OAuth2 token response
+type tokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	IDToken      string `json:"id_token,omitempty"`
+	Scope        string `json:"scope,omitempty"`
+}
+
 // NewClient creates a new OIDC client from the provided configuration
 func NewClient(cfg *config.OIDCConfig) (*Client, error) {
 	if cfg == nil {
@@ -80,8 +100,7 @@ func NewClient(cfg *config.OIDCConfig) (*Client, error) {
 		return nil, fmt.Errorf("at least one scope is required")
 	}
 
-	// Check for client secret from environment variable
-	// Environment variable takes precedence over config file
+	// Client secret must be provided via environment variable (not supported in YAML config)
 	if secret := os.Getenv(SSOSecretEnvVar); secret != "" {
 		cfg.ClientSecret = secret
 	}
@@ -268,6 +287,127 @@ func (c *Client) Login(ctx context.Context) (*AuthResult, error) {
 // GetTokens loads and returns the stored tokens
 func (c *Client) GetTokens() (*Tokens, error) {
 	return c.LoadTokens()
+}
+
+// HasClientCredentials returns true if the client has both client ID and client secret configured
+// This indicates the client can use the client credentials flow for non-interactive authentication
+func (c *Client) HasClientCredentials() bool {
+	return c.config.ClientID != "" && c.config.ClientSecret != ""
+}
+
+// LoginWithClientCredentials performs the OAuth2 client credentials flow
+// This is used for non-interactive (machine-to-machine) authentication
+func (c *Client) LoginWithClientCredentials(ctx context.Context) (*AuthResult, error) {
+	if !c.HasClientCredentials() {
+		return nil, fmt.Errorf("client credentials flow requires both client ID and client secret")
+	}
+
+	// Discover the token endpoint
+	tokenEndpoint, err := c.discoverTokenEndpoint(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover token endpoint: %w", err)
+	}
+
+	// Prepare the token request
+	data := url.Values{}
+	data.Set("grant_type", "client_credentials")
+	data.Set("client_id", c.config.ClientID)
+	data.Set("client_secret", c.config.ClientSecret)
+	if len(c.config.Scopes) > 0 {
+		data.Set("scope", strings.Join(c.config.Scopes, " "))
+	}
+
+	// Create the HTTP request
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	// Execute the request
+	httpClient := &http.Client{Timeout: time.Minute}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute token request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read token response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("token request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse the token response
+	var tokenResp tokenResponse
+	if err := json.Unmarshal(body, &tokenResp); err != nil {
+		return nil, fmt.Errorf("failed to parse token response: %w", err)
+	}
+
+	// Calculate expiry time
+	expiry := time.Time{}
+	if tokenResp.ExpiresIn > 0 {
+		expiry = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
+	}
+
+	result := &AuthResult{
+		Tokens: &Tokens{
+			AccessToken:  tokenResp.AccessToken,
+			RefreshToken: tokenResp.RefreshToken,
+			IDToken:      tokenResp.IDToken,
+			TokenType:    tokenResp.TokenType,
+			Expiry:       expiry,
+		},
+	}
+
+	// Save tokens
+	if err := c.SaveTokens(result.Tokens); err != nil {
+		c.logger.Warn("failed to save tokens from client credentials flow", "error", err)
+	}
+
+	c.logger.Info("client credentials authentication successful")
+	return result, nil
+}
+
+// discoverTokenEndpoint fetches the OIDC discovery document and returns the token endpoint
+func (c *Client) discoverTokenEndpoint(ctx context.Context) (string, error) {
+	discoveryURL := strings.TrimSuffix(c.config.Issuer, "/") + "/.well-known/openid-configuration"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create discovery request: %w", err)
+	}
+
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch discovery document: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("discovery request failed with status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read discovery response: %w", err)
+	}
+
+	var discovery oidcDiscoveryResponse
+	if err := json.Unmarshal(body, &discovery); err != nil {
+		return "", fmt.Errorf("failed to parse discovery document: %w", err)
+	}
+
+	if discovery.TokenEndpoint == "" {
+		return "", fmt.Errorf("token_endpoint not found in discovery document")
+	}
+
+	return discovery.TokenEndpoint, nil
 }
 
 // RefreshTokens refreshes the access token using the refresh token

@@ -23,7 +23,7 @@ type SSOConfig struct {
 // OIDCConfig represents OIDC configuration
 type OIDCConfig struct {
 	ClientID     string   `yaml:"clientId"`               // OIDC client ID (required)
-	ClientSecret string   `yaml:"clientSecret,omitempty"` // OIDC client secret (optional, if not provided, PKCE is used)
+	ClientSecret string   `yaml:"-"`                      // OIDC client secret (only from env var SSTART_SSO_SECRET, never from YAML)
 	Issuer       string   `yaml:"issuer"`                 // OIDC issuer URL (required)
 	Scopes       []string `yaml:"scopes"`                 // OIDC scopes (required)
 	RedirectURI  string   `yaml:"redirectUri,omitempty"`  // OIDC redirect URI (optional, can be auto-generated)
@@ -34,9 +34,9 @@ type OIDCConfig struct {
 // UnmarshalYAML implements custom YAML unmarshaling to handle scopes as either array or space-separated string
 func (o *OIDCConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	// Create a temporary struct to unmarshal into
+	// Note: clientSecret is intentionally NOT parsed from YAML - it must be provided via SSTART_SSO_SECRET env var
 	type rawOIDCConfig struct {
 		ClientID     string      `yaml:"clientId"`
-		ClientSecret string      `yaml:"clientSecret,omitempty"`
 		Issuer       string      `yaml:"issuer"`
 		Scopes       interface{} `yaml:"scopes"` // Use interface{} to handle both string and []string
 		RedirectURI  string      `yaml:"redirectUri,omitempty"`
@@ -49,9 +49,8 @@ func (o *OIDCConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return err
 	}
 
-	// Copy fields
+	// Copy fields (clientSecret is NOT copied - must come from env var)
 	o.ClientID = raw.ClientID
-	o.ClientSecret = raw.ClientSecret
 	o.Issuer = raw.Issuer
 	o.RedirectURI = raw.RedirectURI
 	o.PKCE = raw.PKCE

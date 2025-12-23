@@ -1,17 +1,35 @@
 # SSO Authentication
 
-sstart supports Single Sign-On (SSO) authentication via OIDC (OpenID Connect). When SSO is configured, sstart will automatically authenticate users before fetching secrets from providers. The obtained access token can then be used by providers that require OIDC-based authentication.
+sstart supports Single Sign-On (SSO) authentication via OIDC (OpenID Connect). When SSO is configured, sstart will automatically authenticate users before fetching secrets from providers. The obtained tokens can then be used by providers that require OIDC-based authentication (e.g., Vault/OpenBao with JWT auth).
 
-## How It Works
+## Authentication Flows
 
-1. When you run `sstart -- your-command`, sstart checks if SSO is configured in `.sstart.yml`
-2. If configured, sstart checks for existing valid tokens (stored in `~/.config/sstart/tokens.json`)
-3. If no valid tokens exist or they are expired:
-   - A local HTTP server starts on port 5747
-   - Your default browser opens to the OIDC provider's login page
-   - After successful authentication, tokens are cached locally
-4. The access token is made available to providers for authentication
-5. Secrets are fetched from providers and injected into your subprocess
+sstart supports two authentication flows:
+
+| Flow | When Used | Requirements | Use Case |
+|------|-----------|--------------|----------|
+| **Interactive (Browser)** | `SSTART_SSO_SECRET` not set | Client ID only | Local development, user authentication |
+| **Client Credentials** | `SSTART_SSO_SECRET` is set | Client ID + Client Secret | CI/CD, automated pipelines, service accounts |
+
+### Interactive Flow (Browser-based)
+
+When no client secret is configured, sstart uses the PKCE (Proof Key for Code Exchange) flow:
+
+1. A local HTTP server starts on port 5747
+2. Your default browser opens to the OIDC provider's login page
+3. After successful authentication, tokens are cached locally
+4. The tokens are used for provider authentication
+
+### Client Credentials Flow (Non-interactive)
+
+When `SSTART_SSO_SECRET` is set, sstart uses the OAuth2 client credentials flow:
+
+1. sstart calls the OIDC provider's token endpoint directly
+2. No browser is opened
+3. Tokens are obtained automatically
+4. Perfect for CI/CD environments
+
+**Important**: If client credentials are configured but authentication fails, sstart will return an error—it will NOT fall back to browser-based authentication.
 
 ## Configuration
 
@@ -30,6 +48,9 @@ sso:
 providers:
   - kind: vault
     path: secret/myapp
+    auth:
+      method: jwt
+      role: your-role
 ```
 
 ### Configuration Options
@@ -47,7 +68,9 @@ providers:
 
 | Variable | Description |
 |----------|-------------|
-| `SSTART_SSO_SECRET` | The OIDC client secret. When set, disables PKCE and uses client secret authentication |
+| `SSTART_SSO_SECRET` | The OIDC client secret. When set, enables client credentials flow (non-interactive). When not set, uses browser-based PKCE flow. |
+
+**Note**: The client secret can ONLY be provided via the `SSTART_SSO_SECRET` environment variable. It is intentionally NOT supported in the YAML config file to prevent accidentally committing secrets to version control.
 
 ### Scopes Format
 
@@ -64,13 +87,12 @@ scopes:
 scopes: "openid profile email"
 ```
 
-## Authentication Flow
+## Usage Examples
 
-### PKCE (Recommended for Public Clients)
-
-When `clientSecret` is not provided (or `pkce: true` is set), sstart uses the PKCE (Proof Key for Code Exchange) flow. This is the recommended approach for CLI applications as it doesn't require storing a client secret.
+### Interactive Authentication (Local Development)
 
 ```yaml
+# .sstart.yml
 sso:
   oidc:
     clientId: my-public-client
@@ -80,27 +102,47 @@ sso:
       - profile
 ```
 
-### Confidential Client
-
-For confidential clients that require a client secret, set the secret via the `SSTART_SSO_SECRET` environment variable:
-
 ```bash
-export SSTART_SSO_SECRET="your-client-secret"
+# Just run sstart - browser will open for login
+sstart run -- ./my-app
 ```
 
-Then configure the OIDC settings (without the secret in the config file):
+### Non-Interactive Authentication (CI/CD)
 
 ```yaml
+# .sstart.yml (same config - no secret in file!)
 sso:
   oidc:
-    clientId: my-confidential-client
+    clientId: my-service-account
     issuer: https://auth.example.com
     scopes:
       - openid
       - profile
 ```
 
-**Note**: The client secret is intentionally not stored in the config file to avoid committing secrets to version control.
+```bash
+# Set the secret via environment variable
+export SSTART_SSO_SECRET="your-client-secret"
+
+# sstart will use client credentials flow - no browser
+sstart run -- ./my-app
+```
+
+### GitHub Actions Example
+
+```yaml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run with secrets
+        env:
+          SSTART_SSO_SECRET: ${{ secrets.OIDC_CLIENT_SECRET }}
+        run: |
+          sstart run -- ./deploy.sh
+```
 
 ## Token Storage
 
@@ -154,7 +196,20 @@ if accessToken, ok := config["_sso_access_token"].(string); ok {
 
 **Note**: SSO tokens are only used for provider authentication. They are NOT injected as environment variables into the subprocess.
 
-## Example Configurations
+## OIDC Provider Examples
+
+### With Zitadel
+
+```yaml
+sso:
+  oidc:
+    clientId: 351633448147908967
+    issuer: https://your-instance.zitadel.cloud
+    scopes:
+      - openid
+      - profile
+      - email
+```
 
 ### With Keycloak
 
@@ -167,11 +222,6 @@ sso:
       - openid
       - profile
       - email
-
-providers:
-  - kind: vault
-    address: https://vault.example.com
-    path: secret/myapp
 ```
 
 ### With Auth0
@@ -226,59 +276,13 @@ sso:
       - email
 ```
 
-## Troubleshooting
-
-### Browser Doesn't Open
-
-If the browser doesn't open automatically, the login URL will be printed to the terminal. Copy and paste it into your browser manually.
-
-```
-🔐 Opening browser for authentication...
-   If the browser doesn't open, visit: http://localhost:5747/login
-```
-
-### Port Already in Use
-
-If port 5747 is already in use, the authentication will fail. Ensure no other application is using this port, or wait for the previous sstart process to complete.
-
-### Token Expired
-
-If you see authentication errors, your tokens may have expired and the refresh token is no longer valid. sstart will automatically initiate a new login flow.
-
-### Clearing Tokens
-
-To force a fresh login, you can use the `--force-auth` flag:
-
-```bash
-sstart --force-auth show
-```
-
-Or manually clear the stored tokens:
-
-**macOS** (Keychain):
-```bash
-security delete-generic-password -s sstart -a sso-tokens
-```
-
-**Linux** (if using file fallback):
-```bash
-rm ~/.config/sstart/tokens.json
-```
-
-**Windows** (Credential Manager):
-Use the Windows Credential Manager UI to remove the "sstart" credential.
-
-### Authentication Timeout
-
-The authentication flow times out after 5 minutes. If you don't complete the login within this time, sstart will fail with a timeout error. Simply run the command again to restart the authentication.
-
 ## Vault / OpenBao Integration
 
 When using SSO with HashiCorp Vault or OpenBao, sstart can use the OIDC tokens to authenticate with Vault's JWT auth backend. This allows users to access secrets without managing static Vault tokens.
 
 ### How It Works
 
-1. User authenticates via OIDC (e.g., with Zitadel, Keycloak, Okta)
+1. User authenticates via OIDC (interactively or via client credentials)
 2. sstart obtains an ID token from the OIDC provider
 3. The ID token is sent to Vault/OpenBao's JWT auth backend
 4. Vault validates the token and returns a Vault token
@@ -303,7 +307,7 @@ providers:
     address: https://vault.example.com
     path: secret/myapp
     auth:
-      method: oidc          # or "jwt" - both work the same way
+      method: jwt           # or "oidc" - both work the same way
       role: your-vault-role # Required: the JWT auth role in Vault
       mount: jwt            # Optional: auth backend mount path (default: "jwt")
 ```
@@ -397,11 +401,14 @@ bao policy write sstart-policy sstart-policy.hcl
 
 #### Zitadel Configuration
 
-1. Create an application in Zitadel with:
-   - Application Type: Native (for PKCE) or Web (for client secret)
-   - Redirect URI: `http://localhost:5747/auth/sstart`
+1. Create an application in Zitadel:
+   - **For interactive use**: Application Type: Native (PKCE enabled)
+   - **For CI/CD**: Application Type: Machine-to-machine or Service Account with client credentials
+   - Redirect URI: `http://localhost:5747/auth/sstart` (for interactive)
 
 2. Note your Client ID (e.g., `351633448147908967`)
+
+3. For CI/CD: Generate a client secret
 
 #### OpenBao/Vault Configuration
 
@@ -446,25 +453,76 @@ providers:
     address: https://vault.example.com
     path: secret/myapp
     auth:
-      method: oidc
+      method: jwt
       role: sstart
-      mount: jwt
 ```
 
-### Using Client Secret (Non-PKCE)
-
-Some OIDC providers or Vault configurations may not support PKCE. In this case, set the client secret via environment variable:
+#### Running
 
 ```bash
+# Interactive (browser login)
+sstart show
+
+# Non-interactive (CI/CD)
 export SSTART_SSO_SECRET="your-client-secret"
 sstart show
 ```
 
-The environment variable takes precedence over any `clientSecret` in the config file, keeping secrets out of version control.
+## Troubleshooting
 
-### Troubleshooting Vault SSO
+### Browser Doesn't Open
 
-#### "permission denied" Error
+If the browser doesn't open automatically, the login URL will be printed to the terminal. Copy and paste it into your browser manually.
+
+```
+🔐 Opening browser for authentication...
+   If the browser doesn't open, visit: http://localhost:5747/login
+```
+
+### Port Already in Use
+
+If port 5747 is already in use, the authentication will fail. Ensure no other application is using this port, or wait for the previous sstart process to complete.
+
+### Token Expired
+
+If you see authentication errors, your tokens may have expired and the refresh token is no longer valid. sstart will automatically initiate a new login flow.
+
+### Clearing Tokens
+
+To force a fresh login, you can use the `--force-auth` flag:
+
+```bash
+sstart --force-auth show
+```
+
+Or manually clear the stored tokens:
+
+**macOS** (Keychain):
+```bash
+security delete-generic-password -s sstart -a sso-tokens
+```
+
+**Linux** (if using file fallback):
+```bash
+rm ~/.config/sstart/tokens.json
+```
+
+**Windows** (Credential Manager):
+Use the Windows Credential Manager UI to remove the "sstart" credential.
+
+### Authentication Timeout
+
+The authentication flow times out after 5 minutes. If you don't complete the login within this time, sstart will fail with a timeout error. Simply run the command again to restart the authentication.
+
+### Client Credentials Flow Fails
+
+If the client credentials flow fails, check:
+
+1. **Client secret is correct**: Verify `SSTART_SSO_SECRET` is set correctly
+2. **Grant type enabled**: Ensure your OIDC client has `client_credentials` grant type enabled
+3. **Scopes allowed**: Some providers require specific scopes for client credentials
+
+### Vault "permission denied" Error
 
 This usually means the JWT validation failed. Check:
 
@@ -483,7 +541,7 @@ This usually means the JWT validation failed. Check:
    bao list auth/jwt/role
    ```
 
-#### "role with oidc role_type is not allowed" Error
+### Vault "role with oidc role_type is not allowed" Error
 
 The role is configured with `role_type="oidc"` but sstart requires `role_type="jwt"`. Update the role:
 
@@ -496,25 +554,18 @@ bao write auth/jwt/role/sstart \
   ttl="1h"
 ```
 
-#### "empty client secret" Error
-
-Your OIDC provider requires a client secret but it's not set. Set it via environment variable:
-
-```bash
-export SSTART_SSO_SECRET="your-client-secret"
-```
-
 ## Security Considerations
 
-1. **Token Storage**: Tokens are stored in the system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service) when available. This provides OS-level encryption and access control. Falls back to file storage with restrictive permissions (0600) when keyring is unavailable.
+1. **Client Secret via Environment Only**: The client secret can ONLY be provided via `SSTART_SSO_SECRET` environment variable, never in config files. This prevents accidentally committing secrets to version control.
 
-2. **PKCE**: When possible, use PKCE flow (don't provide `clientSecret`) for better security in CLI applications.
+2. **Token Storage**: Tokens are stored in the system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service) when available. This provides OS-level encryption and access control. Falls back to file storage with restrictive permissions (0600) when keyring is unavailable.
 
-3. **Localhost Callback**: The callback server only binds to `127.0.0.1`, preventing external access.
+3. **PKCE**: When no client secret is configured, sstart uses PKCE flow for better security in interactive CLI applications.
 
-4. **Session Cookies**: Secure, HTTP-only cookies are used during the authentication flow.
+4. **No Fallback**: When client credentials are configured, sstart will NOT fall back to browser-based authentication if authentication fails. This ensures predictable behavior in CI/CD.
 
-5. **No Token Injection**: SSO tokens are NOT injected into subprocess environment variables, limiting exposure.
+5. **Localhost Callback**: The callback server only binds to `127.0.0.1`, preventing external access.
 
-6. **Client Secret via Environment**: Use `SSTART_SSO_SECRET` environment variable instead of storing secrets in config files.
+6. **Session Cookies**: Secure, HTTP-only cookies are used during the authentication flow.
 
+7. **No Token Injection**: SSO tokens are NOT injected into subprocess environment variables, limiting exposure.
