@@ -1,11 +1,15 @@
 name: CI
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize]
+    branches:
+      - main
 
 permissions:
   contents: read
+  checks: write
+  pull-requests: write
 
 jobs:
   test:
@@ -67,17 +71,18 @@ jobs:
               const changedFiles = files.map(f => f.filename);
               console.log('Changed files:', changedFiles);
               
-              // Map provider directories to test name prefixes
-              const providerTestMap = {
-                'internal/provider/aws/': ['TestE2E_AWSSecretsManager'],
-                'internal/provider/azurekeyvault/': ['TestE2E_AzureKeyVault'],
-                'internal/provider/bitwarden/': ['TestE2E_Bitwarden', 'TestE2E_BitwardenSM'],
-                'internal/provider/doppler/': ['TestE2E_Doppler'],
-                'internal/provider/gcsm/': ['TestE2E_GCSM'],
-                'internal/provider/infisical/': ['TestE2E_Infisical'],
-                'internal/provider/onepassword/': ['TestE2E_OnePassword'],
-                'internal/provider/vault/': ['TestE2E_Vault', 'TestE2E_OpenBao'],
-              };
+            // Map provider directories to test name prefixes
+            const providerTestMap = {
+              'internal/provider/aws/': ['TestE2E_AWSSecretsManager'],
+              'internal/provider/azurekeyvault/': ['TestE2E_AzureKeyVault'],
+              'internal/provider/bitwarden/': ['TestE2E_Bitwarden', 'TestE2E_BitwardenSM'],
+              'internal/provider/doppler/': ['TestE2E_Doppler'],
+              'internal/provider/gcsm/': ['TestE2E_GCSM'],
+              'internal/provider/infisical/': ['TestE2E_Infisical'],
+              'internal/provider/onepassword/': ['TestE2E_OnePassword'],
+              'internal/provider/vault/': ['TestE2E_Vault', 'TestE2E_OpenBao'],
+              'internal/oidc/': ['TestE2E_SSO'],
+            };
               
               // Core files that require all tests
               const corePaths = [
@@ -141,13 +146,23 @@ jobs:
           CGO_LDFLAGS: -lm
           # the rest of env supplied by setup-sstart-env
         run: |
+          go install gotest.tools/gotestsum
           if [ "${{ steps.test_filter.outputs.run_all_tests }}" = "true" ]; then
             echo "Running all end-to-end tests"
-            go test -v ./tests/end2end/...
+            gotestsum --junitfile test-results.xml --format testname -- ./tests/end2end/...
           else
             echo "Running selective tests: ${{ steps.test_filter.outputs.test_filter }}"
-            go test -v -run "${{ steps.test_filter.outputs.test_filter }}" ./tests/end2end/...
+            gotestsum --junitfile test-results.xml --format testname -- -run "${{ steps.test_filter.outputs.test_filter }}" ./tests/end2end/...
           fi
+
+      - name: Publish test results
+        if: always() && steps.test_filter.outputs.skip_tests != 'true'
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: test-results.xml
+          check_name: End-to-End Test Results
+          fail_on: 'nothing'
+          comment_mode: off
       
       - name: Skip end-to-end tests
         if: steps.test_filter.outputs.skip_tests == 'true'
@@ -178,6 +193,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
