@@ -159,12 +159,11 @@ jobs:
 
       - name: Publish test results
         if: always() && steps.test_filter.outputs.skip_tests != 'true'
-        uses: dorny/test-reporter@v1
+        uses: EnricoMi/publish-unit-test-result-action@v2
         with:
-          name: End-to-End Test Results
-          path: test-results.xml
-          reporter: java-junit
-          fail-on-error: false
+          files: test-results.xml
+          check_name: End-to-End Test Results
+          fail_on: 'nothing'
       
       - name: Skip end-to-end tests
         if: steps.test_filter.outputs.skip_tests == 'true'
