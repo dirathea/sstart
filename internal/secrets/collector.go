@@ -95,16 +95,6 @@ func (c *Collector) Collect(ctx context.Context, providerIDs []string) (provider
 		// Inject SSO tokens into provider config if available
 		c.injectTokensIntoConfig(expandedConfig)
 
-		// Inject templates field for template provider
-		if len(providerCfg.Templates) > 0 {
-			// Convert Templates map to map[string]interface{} for config
-			templatesMap := make(map[string]interface{})
-			for k, v := range providerCfg.Templates {
-				templatesMap[k] = v
-			}
-			expandedConfig["templates"] = templatesMap
-		}
-
 		// Create SecretContext with resolver for providers
 		// Providers can optionally use SecretsResolver to access secrets from other providers
 		// This follows the principle of least privilege - providers only access secrets they explicitly request
