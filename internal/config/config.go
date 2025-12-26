@@ -94,6 +94,7 @@ type ProviderConfig struct {
 	Config map[string]interface{} `yaml:"-"`              // Provider-specific configuration (e.g., path, region, endpoint, etc.)
 	Keys   map[string]string      `yaml:"keys,omitempty"` // Optional key mappings (source_key: target_key, or "==" to keep same name)
 	Env    EnvVars                `yaml:"env,omitempty"`
+	Uses   []string               `yaml:"uses,omitempty"` // Optional list of provider IDs to depend on
 }
 
 // UnmarshalYAML implements custom YAML unmarshaling to capture provider-specific fields
@@ -133,6 +134,16 @@ func (p *ProviderConfig) UnmarshalYAML(unmarshal func(interface{}) error) error 
 			}
 		}
 		delete(raw, "env")
+	}
+
+	if uses, ok := raw["uses"].([]interface{}); ok {
+		p.Uses = make([]string, 0, len(uses))
+		for _, v := range uses {
+			if str, ok := v.(string); ok {
+				p.Uses = append(p.Uses, str)
+			}
+		}
+		delete(raw, "uses")
 	}
 
 	// Everything else goes into Config
