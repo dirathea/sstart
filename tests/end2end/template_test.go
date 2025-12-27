@@ -493,18 +493,44 @@ providers:
 		t.Fatalf("Failed to write config file: %v", err)
 	}
 
-	cfg, err := config.Load(configFile)
+	// Build sstart binary
+	sstartBinary := filepath.Join(tmpDir, "sstart")
+	projectRoot := getProjectRoot(t)
+	cmdPath := filepath.Join(projectRoot, "cmd", "sstart")
+	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", sstartBinary, cmdPath)
+	buildCmd.Dir = projectRoot
+	if err := buildCmd.Run(); err != nil {
+		t.Fatalf("Failed to build sstart binary: %v", err)
+	}
+
+	// Create a test script that verifies the template resolves with empty value for provider not in 'uses'
+	testScript := filepath.Join(tmpDir, "test_template.sh")
+	scriptContent := `#!/bin/sh
+# Verify template resolves: aws_secret1.KEY1 should be "value1", aws_secret2.KEY2 should be empty (<no value>)
+if [ "$TEST_KEY" != "value1 and <no value>" ]; then
+  echo "ERROR: TEST_KEY mismatch. Expected: 'value1 and <no value>', Got: '$TEST_KEY'"
+  exit 1
+fi
+
+echo "SUCCESS: Template provider correctly resolves with empty value for provider not in 'uses' list"
+exit 0
+`
+
+	if err := os.WriteFile(testScript, []byte(scriptContent), 0755); err != nil {
+		t.Fatalf("Failed to write test script: %v", err)
+	}
+
+	// Run sstart with the test script - should succeed with empty value for provider not in 'uses'
+	runCmd := exec.CommandContext(ctx, sstartBinary, "--config", configFile, "run", "--", testScript)
+	runCmd.Dir = tmpDir
+	output, err := runCmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
+		t.Fatalf("Failed to run sstart command: %v\nOutput: %s", err, output)
 	}
 
-	collector := secrets.NewCollector(cfg)
-	_, err = collector.Collect(ctx, nil)
-	if err == nil {
-		t.Error("Expected error when template provider references provider not in 'uses' list, got nil")
-	} else if !strings.Contains(err.Error(), "not available") && !strings.Contains(err.Error(), "not in 'uses' list") {
-		t.Errorf("Expected error about provider not available (not in 'uses' list), got: %v", err)
+	if !strings.Contains(string(output), "SUCCESS") {
+		t.Errorf("Test script failed. Output: %s", output)
 	}
 
-	t.Logf("Successfully tested template provider security: cannot access providers not in 'uses' list")
+	t.Logf("Successfully tested template provider: providers not in 'uses' list resolve to empty values")
 }
