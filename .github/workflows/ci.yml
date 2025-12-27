@@ -15,6 +15,7 @@ jobs:
   test:
     name: Run End-to-End Tests
     runs-on: ubuntu-latest
+    environment: end2end
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -29,7 +30,7 @@ jobs:
         env:
           INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET: ${{ secrets.INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET }}
           INFISICAL_UNIVERSAL_AUTH_CLIENT_ID: ${{ secrets.INFISICAL_UNIVERSAL_AUTH_CLIENT_ID }}
-          INFISICAL_SITE_URL: ${{ secrets.INFISICAL_SITE_URL }}
+          INFISICAL_SITE_URL: https://eu.infisical.com
         with:
           config: |
             providers:
