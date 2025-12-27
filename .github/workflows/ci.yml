@@ -28,6 +28,7 @@ jobs:
         env:
           CGO_LDFLAGS: -lm
         run: |
+          go install gotest.tools/gotestsum
           echo "Running tests in short mode"
           gotestsum --junitfile test-results.xml --format testname -- -short ./tests/end2end/...
 
