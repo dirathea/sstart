@@ -34,6 +34,7 @@ providers:
 | `dotenv` | Stable |
 | `gcloud_secretmanager` | Stable |
 | `infisical` | Stable |
+| `template` | Stable |
 | `vault` | Stable |
 
 ## Provider Configuration
@@ -589,6 +590,100 @@ You can also use simple environment variable expansion with `${VAR}` or `$VAR` s
     id: shared
     path: ${HOME}/.config/myapp/.env
 ```
+
+## Template Providers
+
+The template provider allows you to construct new secrets by combining values from other providers using Go template syntax. This is useful when your application needs secrets in a different format than how they're stored (e.g., building connection URIs from separate credentials).
+
+**Configuration:**
+- `uses` (required): List of provider IDs that this template provider depends on. The template provider can only access secrets from providers explicitly listed here (principle of least privilege).
+- `templates` (required): Map of output secret keys to template expressions. Each template expression is evaluated using Go's `text/template` package.
+
+**Template Syntax:**
+- Use `{{.<provider_id>.<secret_key>}}` to reference secrets from other providers
+- The syntax is similar to Helm templates and uses Go's text/template package
+- You can use all Go template functions (e.g., `{{if}}`, `{{range}}`, `{{index}}`, etc.)
+- Provider IDs and secret keys are case-sensitive
+
+**Security Model:**
+The template provider follows the principle of least privilege:
+- Only providers listed in the `uses` field are accessible
+- If a provider is not in `uses`, references to it will resolve to empty values
+- This ensures templates can only access secrets they explicitly declare as dependencies
+
+**Provider Order:**
+Template providers must be defined after the providers they depend on. Providers are processed in the order they appear in the configuration file, so ensure all source providers are listed before the template provider.
+
+**Example - Building a Database URI:**
+```yaml
+providers:
+  # Fetch database host configuration
+  - kind: aws_secretsmanager
+    id: db_config
+    secret_id: rds/credentials
+    # Returns: DB_HOST, DB_PORT, DB_NAME
+  
+  # Fetch database credentials
+  - kind: aws_secretsmanager
+    id: db_creds
+    secret_id: rds/prod/credentials
+    # Returns: DB_USER, DB_PASSWORD
+  
+  # Build database URI using template provider
+  - kind: template
+    uses:
+      - db_config
+      - db_creds
+    templates:
+      DATABASE_URI: postgresql://{{.db_creds.DB_USER}}:{{.db_creds.DB_PASSWORD}}@{{.db_config.DB_HOST}}:{{.db_config.DB_PORT}}/{{.db_config.DB_NAME}}
+```
+
+**Example - Multiple Templates:**
+```yaml
+providers:
+  - kind: aws_secretsmanager
+    id: api_config
+    secret_id: api/config
+    # Returns: API_HOST, API_PORT
+  
+  - kind: aws_secretsmanager
+    id: api_creds
+    secret_id: api/credentials
+    # Returns: API_KEY, API_SECRET
+  
+  - kind: template
+    uses:
+      - api_config
+      - api_creds
+    templates:
+      API_BASE_URL: https://{{.api_config.API_HOST}}:{{.api_config.API_PORT}}
+      API_AUTH_HEADER: Bearer {{.api_creds.API_KEY}}
+      API_FULL_URL: https://{{.api_config.API_HOST}}:{{.api_config.API_PORT}}/v1?key={{.api_creds.API_KEY}}
+```
+
+**Example - Using Template Functions:**
+```yaml
+providers:
+  - kind: aws_secretsmanager
+    id: config
+    secret_id: app/config
+    # Returns: ENV (e.g., "production")
+  
+  - kind: template
+    uses:
+      - config
+    templates:
+      # Use conditional logic based on secret values
+      LOG_LEVEL: {{if eq .config.ENV "production"}}error{{else}}debug{{end}}
+      # Combine multiple template expressions
+      APP_ENV: {{.config.ENV}}
+```
+
+**Error Handling:**
+- If a referenced provider ID doesn't exist, the template will fail with an error
+- If a referenced secret key doesn't exist in a provider, it will resolve to an empty value
+- If `uses` is not specified or empty, all provider references will resolve to empty values
+- Template parsing errors will be reported with the specific template expression that failed
 
 ## Multiple Providers
 
