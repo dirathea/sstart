@@ -67,6 +67,7 @@ jobs:
           gotestsum --junitfile test-results.xml --format testname -- ./tests/end2end/...
 
       - name: Publish test results
+        if: always()
         uses: EnricoMi/publish-unit-test-result-action@v2
         with:
           files: test-results.xml
