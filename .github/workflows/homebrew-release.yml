@@ -18,4 +18,4 @@ jobs:
           github_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
           # Specifics for sstart
-          install: 'bin.install "sstart"'
+          install: 'bin.install Dir["**/sstart"][0] => "sstart"'
