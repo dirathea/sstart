@@ -1,0 +1,21 @@
+name: Publish to Homebrew
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  homebrew:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Release to Homebrew
+        uses: Justintime50/homebrew-releaser@v3
+        with:
+          # The name of your tool
+          homebrew_owner: dirathea
+          homebrew_tap: homebrew-sstart
+          formula_folder: Formula
+          github_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+          # Specifics for sstart
+          install: 'bin.install "sstart"'
