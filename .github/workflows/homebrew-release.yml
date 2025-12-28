@@ -12,8 +12,8 @@ jobs:
         uses: Justintime50/homebrew-releaser@v3
         with:
           # The name of your tool
-          homebrew_owner: dirathea
-          homebrew_tap: homebrew-sstart
+          homebrew_owner: securestart
+          homebrew_tap: homebrew-tap
           formula_folder: Formula
           github_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
