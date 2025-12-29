@@ -89,25 +89,31 @@ jobs:
         run: |
           mkdir -p release
           
-          # Determine platform name (matching goreleaser naming convention)
-          OS_NAME="${{ matrix.goos == 'darwin' && 'Darwin' || 'Linux' }}"
-          ARCH_NAME="${{ matrix.goarch == 'amd64' && 'x86_64' || matrix.goarch }}"
-          PLATFORM_NAME="sstart_${OS_NAME}_${ARCH_NAME}"
+          # Use lowercase OS and arch names for the archive filename
+          # Format: sstart-{VERSION}-{os}-{arch}.tar.gz
+          OS_NAME="${{ matrix.goos }}"
+          ARCH_NAME="${{ matrix.goarch }}"
+          ARCHIVE_NAME="sstart-${{ steps.version.outputs.version }}-${OS_NAME}-${ARCH_NAME}"
           
-          # Create platform directory
-          mkdir -p "${PLATFORM_NAME}"
+          # Create temporary directory for archive contents
+          TEMP_DIR=$(mktemp -d)
           
-          # Copy binary
-          cp ${{ matrix.binary_name }} "${PLATFORM_NAME}/sstart"
+          # Copy binary to temp directory
+          cp ${{ matrix.binary_name }} "${TEMP_DIR}/sstart"
           
-          # Copy LICENSE and README
-          cp LICENSE README.md "${PLATFORM_NAME}/" 2>/dev/null || true
+          # Copy LICENSE and README if they exist
+          cp LICENSE README.md "${TEMP_DIR}/" 2>/dev/null || true
           
-          # Create archive (tar.gz for all platforms since we removed Windows)
-          tar -czf "release/${PLATFORM_NAME}.tar.gz" "${PLATFORM_NAME}"
+          # Create archive with binary at root (not in a subdirectory)
+          # Use -C to change into temp directory and archive contents directly
+          tar -czf "release/${ARCHIVE_NAME}.tar.gz" -C "${TEMP_DIR}" .
           
           # Clean up
-          rm -rf "${PLATFORM_NAME}"
+          rm -rf "${TEMP_DIR}"
+          
+          # Verify archive structure (binary should be at root)
+          echo "Archive contents:"
+          tar -tzf "release/${ARCHIVE_NAME}.tar.gz" | head -10
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
