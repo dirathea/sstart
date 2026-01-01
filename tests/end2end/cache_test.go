@@ -160,7 +160,7 @@ providers:
 	}
 }
 
-// TestE2E_Cache_PerProviderOverride tests per-provider cache override
+// TestE2E_Cache_PerProviderOverride tests per-provider cache override (disable when global enabled)
 func TestE2E_Cache_PerProviderOverride(t *testing.T) {
 	tmpDir := t.TempDir()
 	envFile := filepath.Join(tmpDir, ".env")
@@ -226,6 +226,74 @@ providers:
 	}
 	if secrets2["KEY"] != "changed" {
 		t.Errorf("Expected fresh KEY=changed, got %s (per-provider cache override not working)", secrets2["KEY"])
+	}
+}
+
+// TestE2E_Cache_PerProviderEnableWhenGlobalDisabled tests enabling cache per-provider when global is disabled
+func TestE2E_Cache_PerProviderEnableWhenGlobalDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	envFile := filepath.Join(tmpDir, ".env")
+	configFile := filepath.Join(tmpDir, ".sstart.yml")
+
+	// Create .env file
+	if err := os.WriteFile(envFile, []byte("KEY=original\n"), 0600); err != nil {
+		t.Fatalf("Failed to write env file: %v", err)
+	}
+
+	// Create config with global cache DISABLED but provider cache ENABLED
+	configContent := `
+cache:
+  enabled: false
+
+providers:
+  - kind: dotenv
+    id: test-env
+    path: ` + envFile + `
+    cache: true
+`
+	if err := os.WriteFile(configFile, []byte(configContent), 0600); err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	cfg, err := config.Load(configFile)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Global cache should be disabled
+	if cfg.IsCacheEnabled() {
+		t.Fatal("Expected global cache to be disabled")
+	}
+
+	// But provider cache should be enabled via override
+	if !cfg.IsCacheEnabledForProvider("test-env") {
+		t.Fatal("Expected provider cache to be enabled via override")
+	}
+
+	collector := secrets.NewCollector(cfg)
+	ctx := context.Background()
+
+	// First collection
+	secrets1, err := collector.Collect(ctx, nil)
+	if err != nil {
+		t.Fatalf("Failed to collect: %v", err)
+	}
+	if secrets1["KEY"] != "original" {
+		t.Errorf("Expected KEY=original, got %s", secrets1["KEY"])
+	}
+
+	// Modify file
+	if err := os.WriteFile(envFile, []byte("KEY=changed\n"), 0600); err != nil {
+		t.Fatalf("Failed to write env file: %v", err)
+	}
+
+	// Second collection - should get CACHED value since provider cache is enabled
+	secrets2, err := collector.Collect(ctx, nil)
+	if err != nil {
+		t.Fatalf("Failed to collect: %v", err)
+	}
+	if secrets2["KEY"] != "original" {
+		t.Errorf("Expected cached KEY=original, got %s (per-provider cache enable not working)", secrets2["KEY"])
 	}
 }
 

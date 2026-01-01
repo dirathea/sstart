@@ -168,6 +168,10 @@ func (c *Cache) Set(cacheKey string, secrets map[string]string) error {
 			Providers: make(map[string]*CachedSecrets),
 		}
 	}
+	// Ensure Providers map is initialized (handles corrupted/empty cache files)
+	if store.Providers == nil {
+		store.Providers = make(map[string]*CachedSecrets)
+	}
 
 	now := time.Now()
 	store.Providers[cacheKey] = &CachedSecrets{

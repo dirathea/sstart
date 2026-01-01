@@ -328,3 +328,64 @@ func TestCache_FileFallback(t *testing.T) {
 		t.Errorf("expected KEY=value, got KEY=%s", cached["KEY"])
 	}
 }
+
+func TestCache_CorruptedCacheFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	cachePath := filepath.Join(tmpDir, "cache.json")
+
+	// Create a cache file with empty JSON (no providers key)
+	if err := os.WriteFile(cachePath, []byte("{}"), 0600); err != nil {
+		t.Fatalf("failed to write corrupted cache file: %v", err)
+	}
+
+	c := New(WithCachePath(cachePath))
+	c.keyringTested = true
+	c.keyringDisabled = true
+
+	// This should NOT panic even with corrupted cache file
+	secrets := map[string]string{"KEY": "value"}
+	err := c.Set("test-key", secrets)
+	if err != nil {
+		t.Fatalf("failed to set cache with corrupted file: %v", err)
+	}
+
+	// Should be able to read back
+	cached, found := c.Get("test-key")
+	if !found {
+		t.Fatal("expected to find cached secrets")
+	}
+
+	if cached["KEY"] != "value" {
+		t.Errorf("expected KEY=value, got KEY=%s", cached["KEY"])
+	}
+}
+
+func TestCache_NullProvidersInFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	cachePath := filepath.Join(tmpDir, "cache.json")
+
+	// Create a cache file with null providers
+	if err := os.WriteFile(cachePath, []byte(`{"providers": null}`), 0600); err != nil {
+		t.Fatalf("failed to write cache file: %v", err)
+	}
+
+	c := New(WithCachePath(cachePath))
+	c.keyringTested = true
+	c.keyringDisabled = true
+
+	// This should NOT panic
+	secrets := map[string]string{"KEY": "value"}
+	err := c.Set("test-key", secrets)
+	if err != nil {
+		t.Fatalf("failed to set cache: %v", err)
+	}
+
+	cached, found := c.Get("test-key")
+	if !found {
+		t.Fatal("expected to find cached secrets")
+	}
+
+	if cached["KEY"] != "value" {
+		t.Errorf("expected KEY=value, got KEY=%s", cached["KEY"])
+	}
+}

@@ -57,8 +57,9 @@ func NewCollector(cfg *config.Config, opts ...CollectorOption) *Collector {
 		}
 	}
 
-	// Initialize cache if enabled in config
-	if cfg.IsCacheEnabled() {
+	// Initialize cache if any caching is potentially needed
+	// Cache is created if global cache is enabled OR if any provider has cache override
+	if cfg.IsCacheEnabled() || hasAnyCacheOverride(cfg) {
 		cacheOpts := []cache.Option{}
 		if ttl := cfg.GetCacheTTL(); ttl > 0 {
 			cacheOpts = append(cacheOpts, cache.WithTTL(ttl))
@@ -298,6 +299,16 @@ func Mask(value string) string {
 		return value[:2] + "****"
 	}
 	return value[:2] + "****" + value[len(value)-2:]
+}
+
+// hasAnyCacheOverride checks if any provider has an explicit cache override set to true
+func hasAnyCacheOverride(cfg *config.Config) bool {
+	for _, p := range cfg.Providers {
+		if p.Cache != nil && *p.Cache {
+			return true
+		}
+	}
+	return false
 }
 
 // ClearCache clears all cached secrets
