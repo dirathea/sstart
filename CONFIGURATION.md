@@ -774,3 +774,84 @@ The SSO access token is made available to providers for authentication but is NO
 
 For complete SSO configuration options, authentication flows, and provider integration details, see [SSO.md](SSO.md).
 
+## Secret Caching
+
+sstart supports caching secrets to reduce API calls to secret providers. When caching is enabled, secrets are stored securely in the system keyring (or a fallback file) with a configurable TTL (time-to-live).
+
+### How It Works
+
+1. When a provider fetches secrets, a unique cache key is generated based on the provider configuration (ID, kind, and settings)
+2. Secrets are stored in the system keyring with an expiration timestamp
+3. On subsequent runs, if valid cached secrets exist, they are used instead of making API calls
+4. When the cache expires (TTL reached), secrets are fetched fresh from the provider
+
+### Configuration
+
+Enable caching globally with the `cache` configuration:
+
+```yaml
+cache:
+  enabled: true    # Enable caching (default: false)
+  ttl: 5m          # Cache TTL (default: 5m). Supports Go duration format: 30s, 5m, 1h, etc.
+
+providers:
+  - kind: aws_secretsmanager
+    secret_id: myapp/production
+```
+
+### Per-Provider Cache Control
+
+You can override the global cache setting for individual providers:
+
+```yaml
+cache:
+  enabled: true
+  ttl: 10m
+
+providers:
+  # This provider uses the global cache setting (enabled)
+  - kind: aws_secretsmanager
+    id: aws-prod
+    secret_id: myapp/production
+  
+  # This provider disables caching (always fetch fresh)
+  - kind: vault
+    id: vault-secrets
+    path: secret/myapp
+    cache: false
+  
+  # This provider enables caching even if global cache is disabled
+  - kind: dotenv
+    id: local-env
+    path: .env
+    cache: true
+```
+
+### Storage
+
+Secrets are cached using:
+1. **System Keyring** (preferred): Uses the OS-native secure storage (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+2. **File Fallback**: If keyring is unavailable, falls back to `~/.config/sstart/secrets-cache.json` with secure permissions (0600)
+
+### Cache Key Generation
+
+The cache key is a SHA-256 hash of:
+- Provider ID
+- Provider kind
+- Provider configuration (excluding SSO tokens which change frequently)
+
+This ensures that different provider configurations are cached separately, and configuration changes automatically invalidate the cache.
+
+### Use Cases
+
+- **Development**: Cache secrets during development to avoid repeated API calls
+- **CI/CD**: Reduce latency and API rate limiting during frequent builds
+- **Local Testing**: Speed up local runs when secrets don't change often
+
+### Security Considerations
+
+- Cached secrets are stored in the system keyring, which provides OS-level encryption
+- The file fallback uses restrictive permissions (owner read/write only)
+- Cache is automatically invalidated when TTL expires
+- SSO tokens are excluded from cache key generation to ensure proper token refresh
+
