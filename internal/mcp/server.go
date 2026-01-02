@@ -37,7 +37,8 @@ type Server struct {
 	state      atomic.Int32
 	stateMu    sync.RWMutex
 	startMu    sync.Mutex
-	env        []string
+	secrets    map[string]string
+	inherit    bool
 	cancelFunc context.CancelFunc
 
 	// Cached capabilities after initialization
@@ -59,10 +60,11 @@ type Server struct {
 }
 
 // NewServer creates a new server instance with the given configuration
-func NewServer(config ServerConfig, env []string) *Server {
+func NewServer(config ServerConfig, secrets map[string]string, inherit bool) *Server {
 	return &Server{
 		config:          config,
-		env:             env,
+		secrets:         secrets,
+		inherit:         inherit,
 		pendingRequests: make(map[interface{}]chan *JSONRPCMessage),
 	}
 }
@@ -82,6 +84,23 @@ func (s *Server) IsRunning() bool {
 	return s.State() == ServerStateRunning
 }
 
+// buildEnv builds the environment variable slice for the subprocess
+func (s *Server) buildEnv() []string {
+	var env []string
+
+	// Start with system environment if inheriting
+	if s.inherit {
+		env = os.Environ()
+	}
+
+	// Add collected secrets
+	for key, value := range s.secrets {
+		env = append(env, fmt.Sprintf("%s=%s", key, value))
+	}
+
+	return env
+}
+
 // Start starts the downstream MCP server subprocess
 func (s *Server) Start(ctx context.Context) error {
 	s.startMu.Lock()
@@ -99,7 +118,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Create the command
 	s.cmd = exec.CommandContext(serverCtx, s.config.Command, s.config.Args...)
-	s.cmd.Env = s.env
+	s.cmd.Env = s.buildEnv()
 
 	// Set up pipes for stdio communication
 	stdin, err := s.cmd.StdinPipe()
@@ -467,20 +486,22 @@ func (s *Server) FetchPrompts(ctx context.Context) ([]Prompt, error) {
 // ServerManager manages multiple downstream MCP servers
 type ServerManager struct {
 	servers map[string]*Server
-	env     []string
+	secrets map[string]string
+	inherit bool
 	mu      sync.RWMutex
 }
 
 // NewServerManager creates a new server manager
-func NewServerManager(configs []ServerConfig, env []string) *ServerManager {
+func NewServerManager(configs []ServerConfig, secrets map[string]string, inherit bool) *ServerManager {
 	servers := make(map[string]*Server)
 	for _, cfg := range configs {
-		servers[cfg.ID] = NewServer(cfg, env)
+		servers[cfg.ID] = NewServer(cfg, secrets, inherit)
 	}
 
 	return &ServerManager{
 		servers: servers,
-		env:     env,
+		secrets: secrets,
+		inherit: inherit,
 	}
 }
 

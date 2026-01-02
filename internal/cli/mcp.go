@@ -81,9 +81,6 @@ Example usage in Claude Desktop config:
 			return fmt.Errorf("failed to collect secrets: %w", err)
 		}
 
-		// Build environment for downstream servers
-		env := buildEnvironment(cfg.Inherit, collectedSecrets)
-
 		// Convert config to MCP server configs
 		serverConfigs := make([]mcp.ServerConfig, 0, len(cfg.MCP.Servers))
 		for _, s := range cfg.MCP.Servers {
@@ -95,8 +92,8 @@ Example usage in Claude Desktop config:
 			serverConfigs = append(serverConfigs, serverConfig)
 		}
 
-		// Create server manager
-		manager := mcp.NewServerManager(serverConfigs, env)
+		// Create server manager with secrets and inherit flag
+		manager := mcp.NewServerManager(serverConfigs, collectedSecrets, cfg.Inherit)
 
 		// Create transport for communication with AI host (stdin/stdout)
 		transport := mcp.NewStdioTransport(os.Stdin, os.Stdout)
@@ -115,23 +112,6 @@ Example usage in Claude Desktop config:
 		}
 		return nil
 	},
-}
-
-// buildEnvironment builds the environment variable list for downstream servers
-func buildEnvironment(inherit bool, secrets map[string]string) []string {
-	var env []string
-
-	// Start with system environment if inheriting
-	if inherit {
-		env = os.Environ()
-	}
-
-	// Add collected secrets
-	for key, value := range secrets {
-		env = append(env, fmt.Sprintf("%s=%s", key, value))
-	}
-
-	return env
 }
 
 func init() {
