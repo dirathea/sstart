@@ -41,10 +41,12 @@ providers:
 #       - openid
 #       - profile
 
-# Optional: Cache secrets to reduce API calls
-# cache:
-#   enabled: true
-#   ttl: 5m
+# Cache configuration - RECOMMENDED for MCP proxy mode
+# With lazy loading, servers start on first access. Caching ensures
+# secrets are fetched once and reused when new servers start.
+cache:
+  enabled: true
+  ttl: 15m
 
 # MCP proxy configuration
 mcp:
