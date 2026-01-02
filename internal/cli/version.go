@@ -13,6 +13,11 @@ var (
 	buildInfo = ""
 )
 
+// GetVersion returns the current version string
+func GetVersion() string {
+	return version
+}
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",

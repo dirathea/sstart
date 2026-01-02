@@ -1,0 +1,87 @@
+# Example sstart configuration for MCP proxy mode
+# This configuration demonstrates how to use sstart as an MCP proxy
+# that injects secrets into downstream MCP servers.
+
+# Inherit system environment variables (default: true)
+inherit: true
+
+# Provider configuration - secrets are collected from these providers
+providers:
+  # Example: Fetch database URL from HashiCorp Vault
+  - kind: vault
+    id: vault-db
+    address: https://vault.example.com
+    path: secret/data/myapp/database
+    token: ${VAULT_TOKEN}  # Or use SSO auth
+    keys:
+      DATABASE_URL: ==
+
+  # Example: Fetch API keys from AWS Secrets Manager
+  - kind: aws_secretsmanager
+    id: aws-api-keys
+    secret_name: prod/api-keys
+    region: us-east-1
+    keys:
+      OPENAI_API_KEY: ==
+      ANTHROPIC_API_KEY: ==
+
+  # Example: Local development secrets from .env file
+  - kind: dotenv
+    id: local-dev
+    path: .env.local
+    keys:
+      DEBUG: ==
+
+# Optional: SSO configuration for provider authentication
+# sso:
+#   oidc:
+#     clientId: your-client-id
+#     issuer: https://auth.example.com
+#     scopes:
+#       - openid
+#       - profile
+
+# Cache configuration - RECOMMENDED for MCP proxy mode
+# With lazy loading, servers start on first access. Caching ensures
+# secrets are fetched once and reused when new servers start.
+cache:
+  enabled: true
+  ttl: 15m
+
+# MCP proxy configuration
+mcp:
+  servers:
+    # PostgreSQL MCP server - will receive DATABASE_URL from Vault
+    - id: postgres
+      command: npx
+      args: ["@modelcontextprotocol/server-postgres"]
+
+    # Filesystem MCP server - allows AI to read/write files in a specific directory
+    - id: filesystem
+      command: npx
+      args: ["@modelcontextprotocol/server-filesystem", "/home/user/projects"]
+
+    # Custom API server - will receive API keys from AWS
+    - id: custom-api
+      command: ./my-api-mcp-server
+      args: ["--port", "0"]
+
+# Usage:
+#
+# 1. Run sstart as MCP proxy:
+#    sstart mcp --config .sstart.yml.mcp
+#
+# 2. Configure in Claude Desktop (claude_desktop_config.json):
+#    {
+#      "mcpServers": {
+#        "secure-servers": {
+#          "command": "sstart",
+#          "args": ["mcp", "--config", "/path/to/.sstart.yml.mcp"]
+#        }
+#      }
+#    }
+#
+# 3. The AI will see namespaced tools/resources:
+#    - postgres/query
+#    - filesystem/read_file
+#    - custom-api/call_endpoint
