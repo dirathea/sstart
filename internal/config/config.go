@@ -15,6 +15,21 @@ type Config struct {
 	Providers []ProviderConfig `yaml:"providers"`
 	SSO       *SSOConfig       `yaml:"sso,omitempty"`   // SSO configuration
 	Cache     *CacheConfig     `yaml:"cache,omitempty"` // Cache configuration
+	MCP       *MCPConfig       `yaml:"mcp,omitempty"`   // MCP proxy configuration
+}
+
+// MCPConfig represents the MCP proxy configuration
+type MCPConfig struct {
+	Servers []MCPServerConfig `yaml:"servers"` // List of downstream MCP servers
+}
+
+// MCPServerConfig represents a single downstream MCP server configuration
+type MCPServerConfig struct {
+	ID      string   `yaml:"id"`             // Unique identifier for the server (used for namespacing)
+	Command string   `yaml:"command"`        // Command to execute
+	Args    []string `yaml:"args,omitempty"` // Command arguments
+	Env     EnvVars  `yaml:"env,omitempty"`  // Additional environment variables
+	// Future: Secrets []string `yaml:"secrets,omitempty"` // Optional: filter which provider secrets to inject
 }
 
 // CacheConfig represents cache configuration
@@ -281,7 +296,41 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	// Validate MCP configuration if present
+	if config.MCP != nil {
+		if err := validateMCPConfig(config.MCP); err != nil {
+			return nil, err
+		}
+	}
+
 	return &config, nil
+}
+
+// validateMCPConfig validates the MCP proxy configuration
+func validateMCPConfig(mcp *MCPConfig) error {
+	if len(mcp.Servers) == 0 {
+		return fmt.Errorf("mcp.servers must contain at least one server")
+	}
+
+	// Track server IDs to check for duplicates
+	serverIDs := make(map[string]int)
+
+	for i, server := range mcp.Servers {
+		if server.ID == "" {
+			return fmt.Errorf("mcp.servers[%d].id is required", i)
+		}
+		if server.Command == "" {
+			return fmt.Errorf("mcp.servers[%d].command is required", i)
+		}
+
+		// Check for duplicate IDs
+		if _, exists := serverIDs[server.ID]; exists {
+			return fmt.Errorf("duplicate mcp server id '%s' at index %d", server.ID, i)
+		}
+		serverIDs[server.ID] = i
+	}
+
+	return nil
 }
 
 // GetProvider returns a provider configuration by id
@@ -305,4 +354,9 @@ func (c *Config) GetCacheTTL() time.Duration {
 		return 0
 	}
 	return c.Cache.TTL
+}
+
+// HasMCP returns whether MCP configuration is present
+func (c *Config) HasMCP() bool {
+	return c.MCP != nil && len(c.MCP.Servers) > 0
 }

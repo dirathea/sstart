@@ -23,6 +23,7 @@ You define all your required secrets from all your sources in a single, declarat
 - 🚀 **Subprocess Execution**: Automatically inject secrets into subprocesses
 - 🔒 **Secure by Default**: Secrets never appear in shell history or logs
 - ⚙️ **YAML Configuration**: Easy-to-use configuration file
+- 🤖 **MCP Proxy**: Act as an MCP (Model Context Protocol) proxy to securely inject secrets into AI-powered tools
 
 ## Installation
 
@@ -144,6 +145,54 @@ source <(sstart sh)
 
 Flags:
 - `--providers`: Comma-separated list of provider IDs to use (default: all providers)
+
+### `sstart mcp`
+
+Run sstart as an MCP (Model Context Protocol) proxy server. This allows AI hosts like Claude Desktop to securely access MCP servers with secrets injected.
+
+```bash
+sstart mcp
+sstart mcp --config .sstart.yml
+```
+
+The MCP proxy:
+- Aggregates multiple downstream MCP servers
+- Injects secrets from providers into each server's environment
+- Namespaces tools, resources, and prompts with server IDs (e.g., `postgres/query`, `filesystem/read_file`)
+- Lazy-loads servers on first access
+
+Example configuration:
+
+```yaml
+providers:
+  - kind: vault
+    address: https://vault.example.com
+    path: secret/data/myapp
+    keys:
+      DATABASE_URL: ==
+
+mcp:
+  servers:
+    - id: postgres
+      command: npx
+      args: ["@modelcontextprotocol/server-postgres"]
+    - id: filesystem
+      command: npx
+      args: ["@modelcontextprotocol/server-filesystem", "/allowed/path"]
+```
+
+Claude Desktop configuration (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "secure-servers": {
+      "command": "sstart",
+      "args": ["mcp", "--config", "/path/to/.sstart.yml"]
+    }
+  }
+}
+```
 
 ## Configuration
 
