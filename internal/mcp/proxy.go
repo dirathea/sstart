@@ -39,13 +39,13 @@ type Proxy struct {
 }
 
 // NewProxy creates a new MCP proxy
-func NewProxy(manager *ServerManager, transport Transport) *Proxy {
+func NewProxy(manager *ServerManager, transport Transport, version string) *Proxy {
 	return &Proxy{
 		manager:   manager,
 		transport: transport,
 		proxyInfo: Info{
 			Name:    "sstart-mcp-proxy",
-			Version: "0.1.0",
+			Version: version,
 		},
 	}
 }

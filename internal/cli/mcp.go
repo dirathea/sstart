@@ -99,7 +99,7 @@ Example usage in Claude Desktop config:
 		transport := mcp.NewStdioTransport(os.Stdin, os.Stdout)
 
 		// Create and run the proxy
-		proxy := mcp.NewProxy(manager, transport)
+		proxy := mcp.NewProxy(manager, transport, GetVersion())
 
 		// Run proxy (blocks until context is cancelled or EOF)
 		err = proxy.Run(ctx)
