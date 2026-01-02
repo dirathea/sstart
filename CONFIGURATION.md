@@ -776,7 +776,7 @@ For complete SSO configuration options, authentication flows, and provider integ
 
 ## Secret Caching
 
-sstart supports caching secrets to reduce API calls to secret providers. When caching is enabled, secrets are stored securely in the system keyring (or a fallback file) with a configurable TTL (time-to-live).
+sstart supports caching secrets to reduce API calls to secret providers. When caching is enabled, secrets are stored securely in the system keyring with a configurable TTL (time-to-live).
 
 ### How It Works
 
