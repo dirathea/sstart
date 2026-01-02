@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/dirathea/sstart/internal/cache"
 	"github.com/dirathea/sstart/internal/config"
 	"github.com/dirathea/sstart/internal/oidc"
 	"github.com/dirathea/sstart/internal/provider"
@@ -26,6 +27,7 @@ type Collector struct {
 	accessToken string
 	idToken     string
 	forceAuth   bool
+	cache       *cache.Cache
 }
 
 // CollectorOption is a functional option for configuring the Collector
@@ -53,6 +55,15 @@ func NewCollector(cfg *config.Config, opts ...CollectorOption) *Collector {
 		if err == nil {
 			collector.ssoClient = client
 		}
+	}
+
+	// Initialize cache if enabled
+	if cfg.IsCacheEnabled() {
+		cacheOpts := []cache.Option{}
+		if ttl := cfg.GetCacheTTL(); ttl > 0 {
+			cacheOpts = append(cacheOpts, cache.WithTTL(ttl))
+		}
+		collector.cache = cache.New(cacheOpts...)
 	}
 
 	return collector
@@ -83,14 +94,29 @@ func (c *Collector) Collect(ctx context.Context, providerIDs []string) (provider
 			return nil, err
 		}
 
+		// Expand template variables in config (e.g., in path fields)
+		expandedConfig := expandConfigTemplates(providerCfg.Config)
+
+		// Generate cache key based on provider configuration
+		cacheKey := cache.GenerateCacheKey(providerID, providerCfg.Kind, expandedConfig)
+
+		// Try to get secrets from cache if enabled
+		if c.cache != nil {
+			if cachedSecrets, found := c.cache.Get(cacheKey); found {
+				// Use cached secrets
+				providerSecrets[providerID] = cachedSecrets
+				for k, v := range cachedSecrets {
+					secrets[k] = v
+				}
+				continue
+			}
+		}
+
 		// Create provider instance
 		prov, err := provider.New(providerCfg.Kind)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create provider '%s': %w", providerID, err)
 		}
-
-		// Expand template variables in config (e.g., in path fields)
-		expandedConfig := expandConfigTemplates(providerCfg.Config)
 
 		// Inject SSO tokens into provider config if available
 		c.injectTokensIntoConfig(expandedConfig)
@@ -118,6 +144,11 @@ func (c *Collector) Collect(ctx context.Context, providerIDs []string) (provider
 		providerSecrets[providerID] = make(provider.Secrets)
 		for _, kv := range kvs {
 			providerSecrets[providerID][kv.Key] = kv.Value
+		}
+
+		// Cache the secrets if caching is enabled
+		if c.cache != nil {
+			_ = c.cache.Set(cacheKey, providerSecrets[providerID])
 		}
 
 		// Merge secrets (later providers override earlier ones)
@@ -264,4 +295,17 @@ func Mask(value string) string {
 		return value[:2] + "****"
 	}
 	return value[:2] + "****" + value[len(value)-2:]
+}
+
+// ClearCache clears all cached secrets
+func (c *Collector) ClearCache() error {
+	if c.cache == nil {
+		return nil
+	}
+	return c.cache.Clear()
+}
+
+// GetCache returns the cache instance (for testing or advanced usage)
+func (c *Collector) GetCache() *cache.Cache {
+	return c.cache
 }

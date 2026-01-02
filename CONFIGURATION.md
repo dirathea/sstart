@@ -774,3 +774,59 @@ The SSO access token is made available to providers for authentication but is NO
 
 For complete SSO configuration options, authentication flows, and provider integration details, see [SSO.md](SSO.md).
 
+## Secret Caching
+
+sstart supports caching secrets to reduce API calls to secret providers. When caching is enabled, secrets are stored securely in the system keyring with a configurable TTL (time-to-live).
+
+### How It Works
+
+1. When a provider fetches secrets, a unique cache key is generated based on the provider configuration (ID, kind, and settings)
+2. Secrets are stored in the system keyring with an expiration timestamp
+3. On subsequent runs, if valid cached secrets exist, they are used instead of making API calls
+4. When the cache expires (TTL reached), secrets are fetched fresh from the provider
+
+### Configuration
+
+Enable caching with the `cache` configuration:
+
+```yaml
+cache:
+  enabled: true    # Enable caching (default: false)
+  ttl: 5m          # Cache TTL (default: 5m). Supports Go duration format: 30s, 5m, 1h, etc.
+
+providers:
+  - kind: aws_secretsmanager
+    secret_id: myapp/production
+  - kind: vault
+    path: secret/myapp
+```
+
+When enabled, all providers will use the cache. The TTL applies globally to all cached secrets.
+
+### Storage
+
+Secrets are cached using the **System Keyring** (macOS Keychain, Windows Credential Manager, Linux Secret Service).
+
+If the system keyring is not available, caching is silently disabled and secrets are fetched from providers on every run.
+
+### Cache Key Generation
+
+The cache key is a SHA-256 hash of:
+- Provider ID
+- Provider kind
+- Provider configuration (excluding SSO tokens which change frequently)
+
+This ensures that different provider configurations are cached separately, and configuration changes automatically invalidate the cache.
+
+### Use Cases
+
+- **Development**: Cache secrets during development to avoid repeated API calls
+- **CI/CD**: Reduce latency and API rate limiting during frequent builds
+- **Local Testing**: Speed up local runs when secrets don't change often
+
+### Security Considerations
+
+- Cached secrets are stored in the system keyring, which provides OS-level encryption
+- Cache is automatically invalidated when TTL expires
+- SSO tokens are excluded from cache key generation to ensure proper token refresh
+

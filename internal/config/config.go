@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -12,7 +13,43 @@ import (
 type Config struct {
 	Inherit   bool             `yaml:"inherit"` // Whether to inherit system environment variables (default: true)
 	Providers []ProviderConfig `yaml:"providers"`
-	SSO       *SSOConfig       `yaml:"sso,omitempty"` // SSO configuration
+	SSO       *SSOConfig       `yaml:"sso,omitempty"`   // SSO configuration
+	Cache     *CacheConfig     `yaml:"cache,omitempty"` // Cache configuration
+}
+
+// CacheConfig represents cache configuration
+type CacheConfig struct {
+	Enabled bool          `yaml:"enabled"`       // Whether caching is enabled (default: false)
+	TTL     time.Duration `yaml:"ttl,omitempty"` // Cache TTL (default: 5m)
+}
+
+// UnmarshalYAML implements custom YAML unmarshaling to handle TTL as duration string
+func (c *CacheConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	type rawCacheConfig struct {
+		Enabled bool   `yaml:"enabled"`
+		TTL     string `yaml:"ttl,omitempty"`
+	}
+
+	var raw rawCacheConfig
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+
+	c.Enabled = raw.Enabled
+
+	// Parse TTL if provided
+	if raw.TTL != "" {
+		ttl, err := time.ParseDuration(raw.TTL)
+		if err != nil {
+			return fmt.Errorf("invalid cache TTL format '%s': %w", raw.TTL, err)
+		}
+		if ttl <= 0 {
+			return fmt.Errorf("cache TTL must be positive, got '%s'", raw.TTL)
+		}
+		c.TTL = ttl
+	}
+
+	return nil
 }
 
 // SSOConfig represents SSO configuration
@@ -255,4 +292,17 @@ func (c *Config) GetProvider(id string) (*ProviderConfig, error) {
 		}
 	}
 	return nil, fmt.Errorf("provider '%s' not found", id)
+}
+
+// IsCacheEnabled returns whether caching is enabled globally
+func (c *Config) IsCacheEnabled() bool {
+	return c.Cache != nil && c.Cache.Enabled
+}
+
+// GetCacheTTL returns the cache TTL, or 0 if not configured
+func (c *Config) GetCacheTTL() time.Duration {
+	if c.Cache == nil {
+		return 0
+	}
+	return c.Cache.TTL
 }
