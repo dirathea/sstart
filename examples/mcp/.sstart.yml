@@ -5,17 +5,17 @@ providers:
   # Fetch MongoDB credentials from OpenBao
   # Secrets are fetched with their original names
   - kind: vault
-    id: mongodb-creds
+    id: mongodb_creds
     address: http://localhost:8200
     token: demo-token
-    path: secret/data/mongodb
+    path: mongodb
 
   # Construct MongoDB connection string from components
   - kind: template
     uses:
-      - mongodb-creds
+      - mongodb_creds
     templates:
-      MONGODB_URI: "mongodb://{{.mongodb-creds.username}}:{{.mongodb-creds.password}}@{{.mongodb-creds.host}}:{{.mongodb-creds.port}}/{{.mongodb-creds.database}}?authSource={{.mongodb-creds.auth_database}}"
+      MDB_MCP_CONNECTION_STRING: "mongodb://{{.mongodb_creds.username}}:{{.mongodb_creds.password}}@{{.mongodb_creds.host}}:{{.mongodb_creds.port}}/{{.mongodb_creds.database}}?authSource={{.mongodb_creds.auth_database}}"
 
 # Enable caching (recommended for MCP proxy)
 cache:
