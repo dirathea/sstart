@@ -1,0 +1,38 @@
+# sstart MCP Demo - MongoDB with OpenBao + Template Provider
+inherit: true
+
+providers:
+  # Fetch MongoDB credentials from OpenBao
+  # Secrets are fetched with their original names
+  - kind: vault
+    id: mongodb-creds
+    address: http://localhost:8200
+    token: demo-token
+    path: secret/data/mongodb
+
+  # Construct MongoDB connection string from components
+  - kind: template
+    uses:
+      - mongodb-creds
+    templates:
+      MONGODB_URI: "mongodb://{{.mongodb-creds.username}}:{{.mongodb-creds.password}}@{{.mongodb-creds.host}}:{{.mongodb-creds.port}}/{{.mongodb-creds.database}}?authSource={{.mongodb-creds.auth_database}}"
+
+# Enable caching (recommended for MCP proxy)
+cache:
+  enabled: true
+  ttl: 15m
+
+# MCP server configuration
+mcp:
+  servers:
+    # MongoDB MCP server
+    - id: mongodb
+      command: docker
+      args:
+        - run
+        - --rm
+        - -i
+        - --network=host
+        - -e
+        - MDB_MCP_CONNECTION_STRING
+        - mcp/mongodb:latest

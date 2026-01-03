@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # MongoDB (empty, will be populated by AI)
+  mongodb:
+    image: mongo:7
+    container_name: sstart-demo-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: secret123
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: mongosh --eval 'db.runCommand("ping").ok' --quiet
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # OpenBao for storing credentials
+  openbao:
+    image: openbao/openbao:latest
+    container_name: sstart-demo-openbao
+    ports:
+      - "8200:8200"
+    environment:
+      - BAO_DEV_ROOT_TOKEN_ID=demo-token
+      - BAO_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # Initialize OpenBao with MongoDB credentials
+  openbao-init:
+    image: openbao/openbao:latest
+    container_name: sstart-demo-openbao-init
+    depends_on:
+      openbao:
+        condition: service_healthy
+    environment:
+      - BAO_ADDR=http://openbao:8200
+      - BAO_TOKEN=demo-token
+    volumes:
+      - ./init-openbao.sh:/init-openbao.sh:ro
+    entrypoint: ["/bin/sh", "/init-openbao.sh"]
+    restart: "no"
