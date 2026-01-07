@@ -16,8 +16,9 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/vault/api v1.22.0
-	github.com/infisical/go-sdk v0.6.3
+	github.com/infisical/go-sdk v0.6.4
 	github.com/joho/godotenv v1.5.1
+	github.com/modelcontextprotocol/go-sdk v1.2.0
 	github.com/spf13/cobra v1.10.2
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/localstack v0.40.0
@@ -115,7 +116,6 @@ require (
 	github.com/moby/sys/user v0.4.0 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/moby/term v0.5.0 // indirect
-	github.com/modelcontextprotocol/go-sdk v1.2.0 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
